@@ -1,0 +1,67 @@
+---
+title: "Preliminary analysis"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(nlme)
+library(broom)
+
+```
+
+Bring in the data.
+
+```{r}
+d <- read_tsv("liwc/liwc_w_meta.tsv")
+
+```
+
+Gotta get rid of multiple pubs in same year for same author. I use a random number to select one work per year per author.
+
+```{r}
+set.seed(12345)
+d <- d |>
+  rowwise() |> 
+  mutate(rand_num = runif(1, 0, 1)) |> 
+  arrange(hathi_author, firstpub, rand_num) |> 
+  group_by(hathi_author, firstpub) |> 
+  slice(1) |> 
+  ungroup()
+
+```
+
+Explicitly pulling out the means and limiting to 1900-2000 (for sample size).
+
+```{r}
+d <- d |> 
+  group_by(hathi_author) |> 
+  mutate(m_negemo = mean(negemo),
+         d_negemo = negemo - m_negemo) |> 
+  ungroup() |> 
+  filter(firstpub < 2001 & firstpub > 1899)
+  
+
+```
+
+Alternative model comparison.
+
+```{r}
+# exchangeable model
+m1 <- lme(d_negemo ~ 1 + factor(firstpub),
+          data = d,
+          random = ~ 1 | hathi_author,
+          method = "ML")
+
+# autocorrelated model
+m2 <- lme(d_negemo ~ 1 + factor(firstpub),
+          data = d,
+          random = ~ 1 | hathi_author,
+          correlation = corCAR1(form = ~ firstpub | hathi_author),
+          method = "ML")
+
+BIC(m1)
+BIC(m2)
+```
+
+The model with no autocorrelation is preferred.
