@@ -7,20 +7,41 @@ output: html_notebook
 library(tidyverse)
 library(nlme)
 library(broom)
-library(tidylog)
 
 ```
 
-Bring in the data. Limiting to 1900-2000 (for sample size), and keeping only authors with 3+ works. Set depvar.
+Bring in the data.
 
 ```{r}
 d <- read_tsv("liwc/liwc_w_meta.tsv")
 
+```
+
+Gotta get rid of multiple pubs in same year for same author. I use a random number to select one work per year per author.
+
+```{r}
+set.seed(12345)
 d <- d |>
+  rowwise() |> 
+  mutate(rand_num = runif(1, 0, 1),
+         author = hathi_author) |> 
+  arrange(author, firstpub, rand_num) |> 
+  group_by(author, firstpub) |> 
+  slice(1) |> 
+  ungroup()
+
+```
+
+Explicitly pulling out the means, limiting to 1900-2000 (for sample size), and keeping only authors with 3+ works.
+
+```{r}
+d <- d |> 
+  group_by(author) |> 
+  ungroup() |> 
   filter(firstpub < 2001 & firstpub > 1899) |> 
-  filter(authof3ormore == TRUE) |> 
-  rename(author = hathi_author,
-         y = ipron)
+  filter(authof3ormore == TRUE)
+  
+
 ```
 
 ## FW example
@@ -32,33 +53,28 @@ library(apcR)
 
 width <- 5  # just to "thicken" up the data
 
-# prep data (getting rid of multiple obs per author-year)
+# prep data
 dd <- d |> 
-  select(author, y, authorage, firstpub, birthyear) |> 
-  mutate(y = (y - mean(y)) / sd(y),
+  select(author, relig, authorage, firstpub, birthyear) |> 
+  mutate(y = (relig - mean(relig)) / sd(relig),
          age = floor(authorage/width)*width,
          period = floor(firstpub/width)*width,
          cohort = floor(birthyear/width)*width,
          a = factor(age),
          p = factor(period),
-         c = factor(cohort)) |> 
-  rowwise() |> 
-  mutate(random = runif(1)) |> 
-  group_by(author, p) |> 
-  arrange(random) |> 
-  slice(1) |> 
-  ungroup()
+         c = factor(cohort))
 
 # get alpha_hat estimate from FE
-alphaest <- plm(y ~ age,
+alphaest <- plm(y ~ authorage,
                 data = dd,
                 effect = "twoways",
                 model = "within",
-                index = c("author", "p"))
+                index = c("author", "firstpub"))
 
 alphahat <- coef(alphaest)
 
 
+# APC results
 results <- runapc(y=y, a=a, p=p, c=c, data=dd)
 
 model.full <- results[["model.full"]] # full APC model with theta1, theta2, and APC nonlinearities
@@ -87,11 +103,13 @@ abline(v=0, col="black", lty=2) # gamma-zero line (i.e., line when gamma=0)
 
 # showing the nonlinear effcts (or deviations)
 point.effects(alpha=0, pi=0, gamma=0, results=results,
-              ylim.age = c(-1, 1), ylim.period = c(-1, 1),
-              ylim.cohort = c(-1, 1), show.intercept=TRUE,
-              xlim.age =    c(15, 100),
-              xlim.period = c(1900, 2000),
-              xlim.cohort = c(1820, 1985))
+              ylim.age = c(-2, 2), 
+              ylim.period = c(-2, 2),
+              ylim.cohort = c(-2, 2), 
+              xlim.age = c(18,94),
+              xlim.period = c(1900,2000),
+              xlim.cohort = c(1825,1966),
+              show.intercept=TRUE)
 
 # grabbing the nonlinear effects
 AgeDeviations <- results[["AgeDeviations"]]
@@ -116,11 +134,13 @@ gamma.slope <- slopes[which(slopes$Parameter=="gamma"),"Slopes"]
 
 # displaying the temporal effects given the constraint
 point.effects(alpha=alpha.slope, pi=pi.slope, gamma=gamma.slope, results=results,
-              ylim.age = c(-1.5, 1.5), ylim.period = c(-1.5, 1.5),
-              ylim.cohort = c(-1.5, 1.5), show.intercept=FALSE,
-              xlim.age =    c(15, 100),
-              xlim.period = c(1900, 2000),
-              xlim.cohort = c(1820, 1985))
+              ylim.age = c(-1, 1), 
+              ylim.period = c(-1, 1),
+              ylim.cohort = c(-1, 1), 
+              xlim.age = c(18,94),
+              xlim.period = c(1900,2000),
+              xlim.cohort = c(1825,1966),
+              show.intercept=TRUE)
 
 ```
 
