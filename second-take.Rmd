@@ -1,0 +1,158 @@
+---
+title: "Preliminary analysis"
+output: html_notebook
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning = FALSE,
+                      collapse = TRUE,
+                      fig.retina = 2, # Control using dpi
+                      fig.width = 6,  # generated images
+                      fig.pos = "t",  # pdf mode
+                      fig.align = "center", 
+                      out.width = "100%",
+                      dev = "svg")
+```
+
+
+```{r}
+library(tidyverse)
+
+```
+
+Bring in the data. Limiting to 1900-2000 (for sample size), and keeping only authors with 3+ works. Set depvar.
+
+```{r}
+d <- read_tsv("liwc/liwc_w_meta.tsv")
+
+d <- d |>
+  filter(firstpub < 1990 & firstpub > 1889) |> 
+  filter(authof3ormore == TRUE) |> 
+  filter(us_national = TRUE) |> 
+  rename(author = hathi_author)
+```
+
+```{r}
+cwidth <- 10
+pwidth <- 10
+
+dd <- d |> 
+ mutate(cohort = floor((birthyear-1825)/cwidth)*cwidth + 1825,
+        year = floor(firstpub/pwidth)*pwidth) |> 
+  group_by(cohort) |> 
+  add_tally() |> 
+  filter(n > 100) # drop small cohort groups
+
+ggplot(dd, aes(y = sexual, 
+               x = year, 
+               group = factor(cohort), 
+               color = factor(cohort))) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2)) +
+  theme_minimal()
+
+```
+
+
+FE ANOVA
+
+```{r}
+library(rstatix)
+
+width <- 10
+
+dd <- d |> 
+ mutate(cohort = floor((birthyear-1825)/width)*width + 1825,
+        year = floor(firstpub/width)*width,
+        age = authorage - 45) |> 
+  group_by(author) |> 
+  add_tally() |> 
+  mutate(mage = mean(age)) |>   # need later
+  ungroup() |> 
+  mutate(weight = 1 / (n / (nrow(dd) / n_distinct(dd$author))))
+
+m1 <- lm(sexual ~ age + I(age^2) + factor(cohort) + factor(year) + mage,
+         weight = weight,
+         data = dd)
+at <- anova_test(m1, detailed = TRUE)
+
+C_mse <- at[3,2] / at[3,4]
+P_mse <- at[4,2] / at[4,4]
+
+C_mse / (C_mse + P_mse)
+
+```
+
+Iterate! Decide whether or not to include `mage`. Doesn't seem to matter much though it technically means we're only using w/in author variance to estimate age curve. This is probably good.
+
+```{r, results = FALSE}
+
+my_fit <- function(df) {
+  lm(value ~ age + I(age^2) + factor(cohort) + factor(year) + mage, 
+     data = df,
+     weight = weight)
+}
+
+my_vc <- function(model) {
+  
+  at <- anova_test(model, detailed = TRUE)
+  
+  C_mse <- at[3,2] / at[3,4]
+  P_mse <- at[4,2] / at[4,4]
+
+  C_mse / (C_mse + P_mse)
+  
+}
+  
+
+dd_long <- dd |> 
+  pivot_longer(cols = WC:filler) |> 
+  group_by(name) |> 
+  nest() |> 
+  mutate(model = map(data, my_fit),
+         delta = map(model, my_vc)) |> 
+  select(name, delta) |> 
+  mutate(delta = as.numeric(delta)) |> 
+  arrange(delta)
+
+
+```
+
+
+Visualize distribution
+
+```{r}
+hist(dd_long$delta)
+
+```
+
+
+Adding the age stuff. (Still under development.)
+
+```{r}
+library(lme4)
+
+width <- 10
+
+dd <- d |> 
+ mutate(cohort = floor((birthyear-1825)/width)*width + 1825,
+        year = floor(firstpub/width)*width,
+        age = authorage - 45,
+        cfac = as.factor(cohort),
+        yfac = as.factor(year)) |> 
+  group_by(author) |> 
+  mutate(mage = mean(age)) |> 
+  ungroup()
+
+
+m1 <- lmer(sexual ~ age + I(age^2) + mage + (-1 + age | author) + yfac + cfac,
+           data = dd,
+           REML = FALSE)
+
+```
+
+
+
+
+
