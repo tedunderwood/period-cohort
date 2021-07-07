@@ -1,0 +1,170 @@
+---
+title: "Preliminary analysis"
+output: github_document
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning = FALSE,
+                      collapse = TRUE,
+                      fig.retina = 2, # Control using dpi
+                      fig.width = 6,  # generated images
+                      fig.pos = "t",  # pdf mode
+                      fig.align = "center", 
+                      out.width = "100%",
+                      dev = "svg")
+```
+
+
+```{r}
+library(tidyverse)
+library(rstatix)
+
+```
+
+Bring in the data. Limiting to 1890-1989. Not requiring multiple works, but requiring us_national. Once this chunk is done executing, there should be 5,573 books in d.
+
+```{r}
+d <- read_tsv("../liwc/liwc_w_meta.tsv")
+
+d <- d %>%
+  filter(firstpub < 1990 & firstpub > 1889) %>% 
+  filter(us_national == TRUE) %>%
+  rename(author = hathi_author)
+```
+
+```{r}
+discretize <- function(numericvar, width) {
+  minval = min(numericvar) - 1
+  maxval = max(numericvar) + 1
+  breaks = c()
+  for (i in seq(minval, maxval, width)) {
+    breaks <- c(breaks, i)
+  }
+  breaks <- c(breaks, maxval)
+  
+  neededbreaks = c(breaks[1])
+  previous = breaks[1]
+  for (idx in seq(2, length(breaks) - 1)) {
+    prevct = sum(numericvar >= previous & numericvar < breaks[idx])
+    nextct = sum(numericvar >= breaks[idx] & numericvar < breaks[idx + 1])
+    if (prevct > 20 & nextct > 20 & breaks[idx] != 1989 ){
+      previous = breaks[idx]
+      neededbreaks <- c(neededbreaks, breaks[idx])
+    }
+  }
+breaks <- c(neededbreaks, maxval)
+print(breaks)
+result <- cut(numericvar, breaks = as.integer(breaks), labels = as.character(breaks[1: length(breaks) -1]))
+result
+}
+
+for (width in seq(4, 24, 4)){
+  bylabel = paste('by_', as.character(width), sep = '')
+  fplabel = paste('fp_', as.character(width), sep = '')
+  d[bylabel] <- discretize(as.integer(d$birthyear), width)
+  d[fplabel] <- discretize(as.integer(d$firstpub), width)
+}
+
+```
+
+
+SCALE LIWC COLUMNS WITH BIZARRELY UNEVEN SCALES
+
+```{r}
+for (varnum in seq(10, 89)){
+  d[ , varnum] <- scale(d[ , varnum])[, 1]
+}
+```
+
+```{r, warning = FALSE, message = FALSE}
+chunk2 <- function(x,n) split(x, cut(seq_along(x), n, labels = FALSE)) 
+
+r_squared <- function(vals, preds) {
+  1 - (sum((vals - preds)^2) / sum((vals - mean(preds))^2))
+}
+
+cross_validate <- function(modelstring, data, depvar) {
+  authors <- unique(d$author)
+  authors <- sample(authors)
+  fiveauthsets <- chunk2(authors, 5)
+  rsquaredvals <- c()
+  for (authset in fiveauthsets){
+    dtest <- d[d$author %in% authset,  ]
+    dtrain <- d[!d$author %in% authset,  ]
+    model <- lm(as.formula(modelstring), data = dtrain)
+    oos_predictions <- predict(model, newdata = dtest)
+    r2 <- r_squared(dtest[depvar], oos_predictions)
+    rsquaredvals <- c(rsquaredvals, r2)
+  }
+  mean(rsquaredvals)
+}
+
+varname.col <- c()
+cmse.col <- c()
+pmse.col <- c()
+r2.col <- c()
+delta.col <- c()
+adjdelta.col <- c()
+bywidth.col <- c()
+fpwidth.col <- c()
+bydf.col <- c()
+fpdf.col <- c()
+
+for (varnum in seq(10, 89)){
+  depvar <- colnames(d)[varnum]
+  if (depvar == 'function') next  # that word breaks my as.formula!     
+  bestr2 <- -0.5
+  bestmodel <- 'the unknown ideal'
+  bestbywidth <- 50
+  bestfpwidth <- 50
+  
+  for (bywidth in seq(4, 24, 4)) {
+    for (fpwidth in seq(4, 24, 4)) {
+      bylabel = paste('by_', as.character(bywidth), sep = '')
+      fplabel = paste('fp_', as.character(fpwidth), sep = '')
+      modelstring <- paste(depvar, '~', 'authorage + I(authorage^2) + ', bylabel, '+', fplabel)
+      thisr2 <- cross_validate(modelstring, d, depvar)
+      if (thisr2 > bestr2) {
+        bestr2 <- thisr2
+        bestmodel <- modelstring
+        bestbywidth <- bywidth
+        bestfpwidth <- fpwidth
+      }
+    }
+  }
+  model <- lm(as.formula(bestmodel), data = d)
+  r2 <- summary(model)$r.squared
+  at <- anova_test(model, detailed = TRUE)
+  cmse <- at[3,2]
+  cdf <- at[3,4]
+  pmse <- at[4, 2]
+  pdf <- at[4,4]
+  delta <- cmse / (cmse + pmse)
+  adjdelta = (cmse/cdf) / ((cmse/cdf) + (pmse / pdf))
+  cat(depvar, bestbywidth, bestfpwidth, delta, adjdelta, bestr2, '\n')
+  varname.col <- c(varname.col, depvar)
+  cmse.col <- c(cmse.col, cmse)
+  pmse.col <- c(pmse.col, pmse)
+  r2.col <- c(r2.col, bestr2)
+  delta.col <- c(delta.col, delta)
+  adjdelta.col <- c(adjdelta.col, adjdelta)
+  bywidth.col <- c(bywidth.col, bestbywidth)
+  fpwidth.col <- c(fpwidth.col, bestfpwidth)
+  bydf.col <- c(bydf.col, cdf)
+  fpdf.col <- c(fpdf.col, pdf)
+}
+
+res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col)
+
+```
+```{r, echo = FALSE}
+cat("Mean delta is ", round(mean(delta.col), digits = 5), '\n')
+cat("If we adjust for df it is ", round(mean(adjdelta.col), digits = 5), '\n')
+cat("The average r2 is ", round(mean(r2.col), digits = 5), '\n')
+cat("The weighted average, sum(cmse.col) / (sum(cmse.col) + sum(pmse.col)):\n")
+weighted <- sum(cmse.col) / (sum(cmse.col) + sum(pmse.col))
+cat(round(weighted, digits = 5), '\n')
+hist(delta.col)
+```
