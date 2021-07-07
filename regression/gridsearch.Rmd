@@ -1,9 +1,9 @@
 ---
-title: "Preliminary analysis"
+title: "Finding the best models through a grid search"
 output: github_document
 ---
 
-```{r}
+```{r, echo = FALSE}
 knitr::opts_chunk$set(echo = TRUE, 
                       message = FALSE,
                       warning = FALSE,
@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE,
                       out.width = "100%",
                       dev = "svg")
 ```
-
+Needed packages.
 
 ```{r}
 library(tidyverse)
@@ -33,6 +33,10 @@ d <- d %>%
   filter(us_national == TRUE) %>%
   rename(author = hathi_author)
 ```
+
+Now we convert the numeric columns for birthyear and firstpub into factors. Six different factors are created for each numeric variable, using different binwidths.
+
+To avoid discarding data from the tails, we use a function that creates ad-hoc breaks and requires each new factor level to have at least 20 books. So the breaks toward the end, and especially at the beginning of birthyear, may be more widely spaced than in the middle of the timeline.
 
 ```{r}
 discretize <- function(numericvar, width) {
@@ -72,11 +76,17 @@ for (width in seq(4, 24, 4)){
 
 SCALE LIWC COLUMNS WITH BIZARRELY UNEVEN SCALES
 
+All the dependent variables are converted to zscores, so they will have comparable scales.
+
 ```{r}
 for (varnum in seq(10, 89)){
   d[ , varnum] <- scale(d[ , varnum])[, 1]
 }
 ```
+
+Now we actually do a grid search to find the best binwdiths for firstpub and birthyear. We select the model with highest overall r2, and in doing that use fivefold cross-validation *on unseen authors*.
+
+After selecting the best model we find out how variance is apportioned across variables.
 
 ```{r, warning = FALSE, message = FALSE}
 chunk2 <- function(x,n) split(x, cut(seq_along(x), n, labels = FALSE)) 
@@ -157,8 +167,10 @@ for (varnum in seq(10, 89)){
 }
 
 res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col)
-
+write.csv(res.df, file = 'crossvalidated_delta_knit.tsv', quote = FALSE, row.names = FALSE)
 ```
+RESULTS:
+
 ```{r, echo = FALSE}
 cat("Mean delta is ", round(mean(delta.col), digits = 5), '\n')
 cat("If we adjust for df it is ", round(mean(adjdelta.col), digits = 5), '\n')
