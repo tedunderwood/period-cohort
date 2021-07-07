@@ -28,8 +28,9 @@ Bring in the data. Limiting to 1900-2000 (for sample size), and keeping only aut
 d <- read_tsv("liwc/liwc_w_meta.tsv")
 
 d <- d |>
-  filter(firstpub < 2001 & firstpub > 1899) |> 
+  filter(firstpub < 1990 & firstpub > 1889) |> 
   filter(authof3ormore == TRUE) |> 
+  filter(us_national = TRUE) |> 
   rename(author = hathi_author)
 ```
 
@@ -66,10 +67,13 @@ dd <- d |>
         year = floor(firstpub/width)*width,
         age = authorage - 45) |> 
   group_by(author) |> 
+  add_tally() |> 
   mutate(mage = mean(age)) |>   # need later
-  ungroup()
+  ungroup() |> 
+  mutate(weight = 1 / (n / (nrow(dd) / n_distinct(dd$author))))
 
 m1 <- lm(sexual ~ age + I(age^2) + factor(cohort) + factor(year) + mage,
+         weight = weight,
          data = dd)
 at <- anova_test(m1, detailed = TRUE)
 
@@ -85,7 +89,9 @@ Iterate! Decide whether or not to include `mage`. Doesn't seem to matter much th
 ```{r, results = FALSE}
 
 my_fit <- function(df) {
-  lm(value ~ age + I(age^2) + factor(cohort) + factor(year) + mage, data = df )
+  lm(value ~ age + I(age^2) + factor(cohort) + factor(year) + mage, 
+     data = df,
+     weight = weight)
 }
 
 my_vc <- function(model) {
