@@ -125,7 +125,9 @@ dd_long <- dd %>%
   mutate(cmse = as.numeric(cmse)) %>%
   mutate(pmse = as.numeric(pmse)) %>%
   arrange(delta)
+```
 
+``` r
 print("Current model: use all books, down-weight prolific authors:")
 ## [1] "Current model: use all books, down-weight prolific authors:"
 cat('Raw average delta:', mean(dd_long$delta), '\n')
@@ -142,7 +144,7 @@ distribution
 hist(dd_long$delta)
 ```
 
-<img src="testing_different_corpora_files/figure-gfm/unnamed-chunk-7-1.svg" width="100%" style="display: block; margin: auto;" />
+<img src="testing_different_corpora_files/figure-gfm/unnamed-chunk-8-1.svg" width="100%" style="display: block; margin: auto;" />
 
 ``` r
 
@@ -191,7 +193,9 @@ old_result <- dd %>%
   mutate(cmse = as.numeric(cmse)) %>%
   mutate(pmse = as.numeric(pmse)) %>%
   arrange(delta)
+```
 
+``` r
 print("If we use all books, and don't down-weight prolific authors:")
 ## [1] "If we use all books, and don't down-weight prolific authors:"
 cat('Raw average of delta:', mean(old_result$delta), '\n')
@@ -205,7 +209,7 @@ cat('Weighted average of delta:', weighted_avg, '\n')
 hist(old_result$delta)
 ```
 
-<img src="testing_different_corpora_files/figure-gfm/unnamed-chunk-9-1.svg" width="100%" style="display: block; margin: auto;" />
+<img src="testing_different_corpora_files/figure-gfm/unnamed-chunk-11-1.svg" width="100%" style="display: block; margin: auto;" />
 
 ``` r
 rows <- sample(nrow(dd))
@@ -226,12 +230,14 @@ one_per_results <- one_per_author %>%
   mutate(cmse = as.numeric(cmse)) %>%
   mutate(pmse = as.numeric(pmse)) %>%
   arrange(delta)
+```
 
+``` r
 print('If we use only one book per author:')
 ## [1] "If we use only one book per author:"
 cat('Raw average of delta:', mean(one_per_results$delta), '\n')
-## Raw average of delta: 0.4123999
+## Raw average of delta: 0.4184332
 weighted_avg <- sum(one_per_results$cmse / (sum(one_per_results$cmse) + sum(one_per_results$pmse)))
 cat('Weighted average of delta:', weighted_avg, '\n')
-## Weighted average of delta: 0.2683757
+## Weighted average of delta: 0.4013674
 ```

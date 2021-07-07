@@ -126,12 +126,13 @@ dd_long <- dd %>%
   mutate(cmse = as.numeric(cmse)) %>%
   mutate(pmse = as.numeric(pmse)) %>%
   arrange(delta)
+```
 
+```{r}
 print("Current model: use all books, down-weight prolific authors:")
 cat('Raw average delta:', mean(dd_long$delta), '\n')
 weighted_avg <- sum(dd_long$cmse / (sum(dd_long$cmse) + sum(dd_long$pmse)))
 cat('Delta calculated by summing total r2:', weighted_avg, '\n')
-
 ```
 
 
@@ -190,7 +191,9 @@ old_result <- dd %>%
   mutate(cmse = as.numeric(cmse)) %>%
   mutate(pmse = as.numeric(pmse)) %>%
   arrange(delta)
+```
 
+```{r}
 print("If we use all books, and don't down-weight prolific authors:")
 cat('Raw average of delta:', mean(old_result$delta), '\n')
 weighted_avg <- sum(old_result$cmse / (sum(old_result$cmse) + sum(old_result$pmse)))
@@ -221,14 +224,13 @@ one_per_results <- one_per_author %>%
   mutate(cmse = as.numeric(cmse)) %>%
   mutate(pmse = as.numeric(pmse)) %>%
   arrange(delta)
+```
 
+```{r}
 print('If we use only one book per author:')
 cat('Raw average of delta:', mean(one_per_results$delta), '\n')
 weighted_avg <- sum(one_per_results$cmse / (sum(one_per_results$cmse) + sum(one_per_results$pmse)))
 cat('Weighted average of delta:', weighted_avg, '\n')
 ```
-
-
-
 
 
