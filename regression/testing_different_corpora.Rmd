@@ -25,7 +25,7 @@ library(tidyverse)
 Bring in the data. Limiting to 1890-1989. Not requiring multiple works, but requiring us_national. Once this chunk is done executing, there should be 5,573 books in d.
 
 ```{r}
-d <- read_tsv("liwc/liwc_w_meta.tsv")
+d <- read_tsv("../liwc/liwc_w_meta.tsv")
 
 d <- d %>%
   filter(firstpub < 1990 & firstpub > 1889) %>% 
@@ -203,7 +203,10 @@ hist(old_result$delta)
 ```
 
 ```{r, message = FALSE, warning = FALSE}
-one_per_author <- dd[!duplicated(dd$author),]
+rows <- sample(nrow(dd))
+shuffled_dd <- dd[rows, ]   # shuffling the data frame because otherwise
+                            # we get *first* book for each author
+one_per_author <- shuffled_dd[!duplicated(shuffled_dd$author),]
 
 one_per_results <- one_per_author %>% 
   pivot_longer(cols = WC:filler) %>% 

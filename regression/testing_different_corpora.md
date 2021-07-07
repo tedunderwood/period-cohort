@@ -23,7 +23,7 @@ but requiring us\_national. Once this chunk is done executing, there
 should be 5,573 books in d.
 
 ``` r
-d <- read_tsv("liwc/liwc_w_meta.tsv")
+d <- read_tsv("../liwc/liwc_w_meta.tsv")
 
 d <- d %>%
   filter(firstpub < 1990 & firstpub > 1889) %>% 
@@ -142,7 +142,7 @@ distribution
 hist(dd_long$delta)
 ```
 
-<img src="second-take_files/figure-gfm/unnamed-chunk-7-1.svg" width="100%" style="display: block; margin: auto;" />
+<img src="testing_different_corpora_files/figure-gfm/unnamed-chunk-7-1.svg" width="100%" style="display: block; margin: auto;" />
 
 ``` r
 
@@ -205,10 +205,13 @@ cat('Weighted average of delta:', weighted_avg, '\n')
 hist(old_result$delta)
 ```
 
-<img src="second-take_files/figure-gfm/unnamed-chunk-9-1.svg" width="100%" style="display: block; margin: auto;" />
+<img src="testing_different_corpora_files/figure-gfm/unnamed-chunk-9-1.svg" width="100%" style="display: block; margin: auto;" />
 
 ``` r
-one_per_author <- dd[!duplicated(dd$author),]
+rows <- sample(nrow(dd))
+shuffled_dd <- dd[rows, ]   # shuffling the data frame because otherwise
+                            # we get *first* book for each author
+one_per_author <- shuffled_dd[!duplicated(shuffled_dd$author),]
 
 one_per_results <- one_per_author %>% 
   pivot_longer(cols = WC:filler) %>% 
@@ -227,8 +230,8 @@ one_per_results <- one_per_author %>%
 print('If we use only one book per author:')
 ## [1] "If we use only one book per author:"
 cat('Raw average of delta:', mean(one_per_results$delta), '\n')
-## Raw average of delta: 0.3969688
+## Raw average of delta: 0.4123999
 weighted_avg <- sum(one_per_results$cmse / (sum(one_per_results$cmse) + sum(one_per_results$pmse)))
 cat('Weighted average of delta:', weighted_avg, '\n')
-## Weighted average of delta: 0.2781602
+## Weighted average of delta: 0.2683757
 ```
