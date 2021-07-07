@@ -236,8 +236,8 @@ one_per_results <- one_per_author %>%
 print('If we use only one book per author:')
 ## [1] "If we use only one book per author:"
 cat('Raw average of delta:', mean(one_per_results$delta), '\n')
-## Raw average of delta: 0.4184332
+## Raw average of delta: 0.4256638
 weighted_avg <- sum(one_per_results$cmse / (sum(one_per_results$cmse) + sum(one_per_results$pmse)))
 cat('Weighted average of delta:', weighted_avg, '\n')
-## Weighted average of delta: 0.4013674
+## Weighted average of delta: 0.3095497
 ```
