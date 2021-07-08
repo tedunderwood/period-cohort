@@ -128,6 +128,45 @@ cross_validate <- function(modelstring, data, depvar) {
   mean(rsquaredvals)
 }
 
+partial_r2s_oos <- function(modelstring, data, depvar, cohortvar, periodvar) {
+  
+  # See how much difference variables make out of sample.
+  
+  authors <- unique(d$author)
+  authors <- sample(authors)
+  tenauthsets <- chunk2(authors, 10)
+  
+  periodr2s <- c()
+  cohortr2s <- c()
+  
+  for (authset in tenauthsets){
+    dtest <- d[d$author %in% authset,  ]
+    dtrain <- d[!d$author %in% authset,  ]
+    model <- lm(as.formula(modelstring), data = dtrain)
+    oos_predictions <- predict(model, newdata = dtest)
+    baser2 <- r_squared(dtest[depvar], oos_predictions)
+    
+    cohortdata <- data.frame(dtest)
+    cohortdata[cohortvar] <- sample(cohortdata[cohortvar][[1]])
+    oos_predictions <- predict(model, newdata = cohortdata)
+    losecohortr2 <- baser2 - r_squared(cohortdata[depvar], oos_predictions)
+    # cat(baser2, ' ', r_squared(cohortdata[depvar], oos_predictions), '\n')
+    
+    perioddata <- data.frame(dtest)
+    perioddata[periodvar] <- sample(perioddata[periodvar][[1]])
+    oos_predictions <- predict(model, newdata = perioddata)
+    loseperiodr2 <- baser2 - r_squared(cohortdata[depvar], oos_predictions)
+    
+    periodr2s <- c(periodr2s, loseperiodr2)
+    cohortr2s <- c(cohortr2s, losecohortr2)
+    
+    # oldcor = sum(dtest[cohortvar] == cohortdata[cohortvar])
+    # cat(oldcor, '\n')
+  }
+  returnvalue <- list(periodr2 = mean(periodr2s), cohortr2  = mean(cohortr2s))
+  returnvalue
+}
+
 periodnames = c('fp_4', 'fp_8', 'fp_12', 'fp_16', 'fp_20', 'fp_24')
 cohortnames = c('by_4', 'by_8', 'by_12', 'by_16', 'by_20', 'by_24')
 
@@ -141,6 +180,10 @@ bywidth.col <- c()
 fpwidth.col <- c()
 bydf.col <- c()
 fpdf.col <- c()
+pmse_oos.col <- c()
+cmse_oos.col <- c()
+delta_oos.col <- c()
+r2_oos.col <- c()
 
 # Iterate across dependent variables:
 
@@ -177,6 +220,15 @@ for (varnum in seq(10, 89)){
   # We're done finding the best model specification.
   # Now we train it on all data and examine sums of squares.
   
+  r2_oos = bestr2
+  variances_oos <- partial_r2s_oos(bestmodel, d, depvar, bestbywidth, bestfpwidth)
+  
+  cmse_oos = variances_oos$cohortr2
+  pmse_oos = variances_oos$periodr2
+  
+  if (cmse_oos < 0) cmse_oos = .00000001    # debatable choice here
+  if (pmse_oos < 0) pmse_oos = .00000001
+  
   model <- lm(as.formula(bestmodel), data = d)
   thisr2 <- summary(model)$r.squared
   at <- anova_test(model, detailed = TRUE)
@@ -200,14 +252,19 @@ for (varnum in seq(10, 89)){
       print('Model error.')
     }
   }
-
+  
   delta <- cmse / (cmse + pmse)
+  delta_oos <- cmse_oos / (cmse_oos + pmse_oos)
   adjdelta = (cmse/cdf) / ((cmse/cdf) + (pmse / pdf))
   cat(depvar, bestbywidth, bestfpwidth, delta, adjdelta, thisr2, '\n')
   varname.col <- c(varname.col, depvar)
   cmse.col <- c(cmse.col, cmse)
   pmse.col <- c(pmse.col, pmse)
+  pmse_oos.col <- c(pmse_oos.col, pmse_oos)
+  cmse_oos.col <- c(cmse_oos.col, cmse_oos)
+  delta_oos.col <- c(delta_oos.col, delta_oos)
   r2.col <- c(r2.col, thisr2)
+  r2_oos.col <- c(r2_oos.col, r2_oos)
   delta.col <- c(delta.col, delta)
   adjdelta.col <- c(adjdelta.col, adjdelta)
   bywidth.col <- c(bywidth.col, bestbywidth)
@@ -216,8 +273,8 @@ for (varnum in seq(10, 89)){
   fpdf.col <- c(fpdf.col, pdf)
 }
 
-res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col)
-write.csv(res.df, file = 'crossvalidated_delta_knit.tsv', quote = FALSE, row.names = FALSE)
+res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col, pmse_oos = pmse_oos.col, cmse_oos = cmse_oos.col, delta_oos = delta_oos.col, r2_oos = r2_oos.col)
+write.csv(res.df, file = 'gridsearch_delta_oos.csv', quote = FALSE, row.names = FALSE)
 ```
 RESULTS:
 
@@ -228,5 +285,7 @@ cat("The average r2 is ", round(mean(r2.col), digits = 5), '\n')
 cat("The weighted average, sum(cmse.col) / (sum(cmse.col) + sum(pmse.col)):\n")
 weighted <- sum(cmse.col) / (sum(cmse.col) + sum(pmse.col))
 cat(round(weighted, digits = 5), '\n')
-hist(delta.col)
+cat('\nMean delta measured oos is ', round(mean(delta_oos.col), digits = 5), '\n')
+cat('but as a weighted average it is:', round(sum(cmse_oos.col) / (sum(cmse_oos.col) + sum(pmse_oos.col)), 5))
+hist(delta.col, breaks = 20, col = 'skyblue1')
 ```

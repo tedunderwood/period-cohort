@@ -138,6 +138,45 @@ cross_validate <- function(modelstring, data, depvar) {
   mean(rsquaredvals)
 }
 
+partial_r2s_oos <- function(modelstring, data, depvar, cohortvar, periodvar) {
+  
+  # See how much difference variables make out of sample.
+  
+  authors <- unique(d$author)
+  authors <- sample(authors)
+  tenauthsets <- chunk2(authors, 10)
+  
+  periodr2s <- c()
+  cohortr2s <- c()
+  
+  for (authset in tenauthsets){
+    dtest <- d[d$author %in% authset,  ]
+    dtrain <- d[!d$author %in% authset,  ]
+    model <- lm(as.formula(modelstring), data = dtrain)
+    oos_predictions <- predict(model, newdata = dtest)
+    baser2 <- r_squared(dtest[depvar], oos_predictions)
+    
+    cohortdata <- data.frame(dtest)
+    cohortdata[cohortvar] <- sample(cohortdata[cohortvar][[1]])
+    oos_predictions <- predict(model, newdata = cohortdata)
+    losecohortr2 <- baser2 - r_squared(cohortdata[depvar], oos_predictions)
+    # cat(baser2, ' ', r_squared(cohortdata[depvar], oos_predictions), '\n')
+    
+    perioddata <- data.frame(dtest)
+    perioddata[periodvar] <- sample(perioddata[periodvar][[1]])
+    oos_predictions <- predict(model, newdata = perioddata)
+    loseperiodr2 <- baser2 - r_squared(cohortdata[depvar], oos_predictions)
+    
+    periodr2s <- c(periodr2s, loseperiodr2)
+    cohortr2s <- c(cohortr2s, losecohortr2)
+    
+    # oldcor = sum(dtest[cohortvar] == cohortdata[cohortvar])
+    # cat(oldcor, '\n')
+  }
+  returnvalue <- list(periodr2 = mean(periodr2s), cohortr2  = mean(cohortr2s))
+  returnvalue
+}
+
 periodnames = c('fp_4', 'fp_8', 'fp_12', 'fp_16', 'fp_20', 'fp_24')
 cohortnames = c('by_4', 'by_8', 'by_12', 'by_16', 'by_20', 'by_24')
 
@@ -151,6 +190,10 @@ bywidth.col <- c()
 fpwidth.col <- c()
 bydf.col <- c()
 fpdf.col <- c()
+pmse_oos.col <- c()
+cmse_oos.col <- c()
+delta_oos.col <- c()
+r2_oos.col <- c()
 
 # Iterate across dependent variables:
 
@@ -187,6 +230,15 @@ for (varnum in seq(10, 89)){
   # We're done finding the best model specification.
   # Now we train it on all data and examine sums of squares.
   
+  r2_oos = bestr2
+  variances_oos <- partial_r2s_oos(bestmodel, d, depvar, bestbywidth, bestfpwidth)
+  
+  cmse_oos = variances_oos$cohortr2
+  pmse_oos = variances_oos$periodr2
+  
+  if (cmse_oos < 0) cmse_oos = .00000001    # debatable choice here
+  if (pmse_oos < 0) pmse_oos = .00000001
+  
   model <- lm(as.formula(bestmodel), data = d)
   thisr2 <- summary(model)$r.squared
   at <- anova_test(model, detailed = TRUE)
@@ -210,14 +262,19 @@ for (varnum in seq(10, 89)){
       print('Model error.')
     }
   }
-
+  
   delta <- cmse / (cmse + pmse)
+  delta_oos <- cmse_oos / (cmse_oos + pmse_oos)
   adjdelta = (cmse/cdf) / ((cmse/cdf) + (pmse / pdf))
   cat(depvar, bestbywidth, bestfpwidth, delta, adjdelta, thisr2, '\n')
   varname.col <- c(varname.col, depvar)
   cmse.col <- c(cmse.col, cmse)
   pmse.col <- c(pmse.col, pmse)
+  pmse_oos.col <- c(pmse_oos.col, pmse_oos)
+  cmse_oos.col <- c(cmse_oos.col, cmse_oos)
+  delta_oos.col <- c(delta_oos.col, delta_oos)
   r2.col <- c(r2.col, thisr2)
+  r2_oos.col <- c(r2_oos.col, r2_oos)
   delta.col <- c(delta.col, delta)
   adjdelta.col <- c(adjdelta.col, adjdelta)
   bywidth.col <- c(bywidth.col, bestbywidth)
@@ -225,97 +282,100 @@ for (varnum in seq(10, 89)){
   bydf.col <- c(bydf.col, cdf)
   fpdf.col <- c(fpdf.col, pdf)
 }
-## Analytic by_20 fp_24 0.7360433 0.6259025 0.03349767 
-## Clout by_20 fp_12 0.4592051 0.5760211 0.02217937 
-## Authentic by_20 fp_16 0.1936713 0.2237392 0.02904634 
-## Tone by_12 fp_16 0.8818388 0.8027899 0.1497175 
-## WPS by_8 fp_20 0.8031102 0.5048882 0.01464109 
-## Sixltr by_20 fp_20 0.5769607 0.5217776 0.02781237 
-## Dic by_20 fp_24 0.6427873 0.5191549 0.0325034 
-## was_function by_24 fp_16 0.3791723 0.4781145 0.02357588 
-## pronoun by_24 fp_16 0.5123554 0.6118029 0.0166409 
-## ppron by_24 fp_24 0.4684925 0.3979823 0.01618675 
-## i by_12 fp_20 0.7729949 0.5532224 0.04846038 
-## we by_24 fp_24 0.2988276 0.2422159 0.01888461 
-## you by_20 fp_8 0.7688872 0.8886977 0.0230294 
-## shehe by_24 fp_4 0.1371486 0.4881478 0.02853965 
-## they by_16 fp_12 0.5157476 0.5157476 0.02708019 
+## Analytic by_20 fp_16 0.764659 0.795876 0.03284901 
+## Clout by_24 fp_20 0.2792976 0.2792976 0.0195134 
+## Authentic by_24 fp_24 0.06147027 0.04682225 0.0270067 
+## Tone by_20 fp_8 0.5371545 0.7358212 0.1413012 
+## WPS by_20 fp_16 0.5564329 0.6008527 0.01042196 
+## Sixltr by_20 fp_4 0.3690147 0.7373363 0.03755357 
+## Dic by_20 fp_8 0.4613898 0.6727655 0.03607194 
+## was_function by_24 fp_8 0.3663573 0.6343064 0.02543075 
+## pronoun by_24 fp_8 0.4528954 0.7129252 0.01866339 
+## ppron by_24 fp_16 0.4645593 0.5654876 0.01780649 
+## i by_12 fp_24 0.7898758 0.5062232 0.04836715 
+## we by_20 fp_16 0.3970308 0.441388 0.02076364 
+## you by_20 fp_20 0.811188 0.7746234 0.02231925 
+## shehe by_24 fp_8 0.14862 0.3436989 0.02445865 
+## they by_16 fp_24 0.8394206 0.6621957 0.02275039 
 ## ipron by_20 fp_24 0.9310704 0.8901646 0.03427086 
-## article by_20 fp_24 0.1979 0.1289475 0.0239536 
-## prep by_20 fp_12 0.6528121 0.7505274 0.06660313 
-## auxverb by_24 fp_20 0.6711497 0.6711497 0.06525669 
-## adverb by_20 fp_4 0.2404928 0.6031569 0.05890832 
-## conj by_20 fp_8 0.5613817 0.754404 0.03956937 
-## negate by_24 fp_16 0.3918744 0.4915071 0.03697176 
-## verb by_20 fp_12 0.545111 0.6572222 0.07310222 
-## adj by_24 fp_20 0.8198453 0.8198453 0.0356062 
-## compare by_20 fp_12 0.5786297 0.68722 0.01794668 
-## interrog by_20 fp_12 0.6893438 0.7802385 0.04851721 
-## number by_8 fp_16 0.7406405 0.5171111 0.03467187 
-## quant by_20 fp_24 0.9517765 0.922131 0.04331421 
+## article by_16 fp_16 0.9433552 0.9258732 0.02894608 
+## prep by_20 fp_16 0.5958953 0.6389276 0.06782346 
+## auxverb by_12 fp_4 0.4938075 0.6803514 0.08018414 
+## adverb by_20 fp_8 0.2662042 0.4654307 0.05704687 
+## conj by_20 fp_20 0.8212386 0.7861072 0.03537081 
+## negate by_12 fp_20 0.7480399 0.5191368 0.04346786 
+## verb by_20 fp_24 0.6917732 0.5738549 0.06912026 
+## adj by_24 fp_16 0.7587389 0.8250932 0.0361977 
+## compare by_24 fp_16 0.7410509 0.8110586 0.01501431 
+## interrog by_20 fp_16 0.7300701 0.7644619 0.04779582 
+## number by_16 fp_24 0.821529 0.6331866 0.02676859 
+## quant by_20 fp_12 0.4435272 0.5604884 0.04761438 
 ## affect by_20 fp_4 0.2368163 0.5983036 0.1257349 
-## posemo by_12 fp_12 0.9457561 0.9269016 0.1829115 
-## negemo by_20 fp_8 0.3332195 0.5453276 0.0308346 
-## anx by_24 fp_20 0.3498025 0.3498025 0.01883659 
+## posemo by_12 fp_16 0.8780591 0.7970635 0.1845748 
+## negemo by_20 fp_20 0.4741982 0.4191065 0.02744558 
+## anx by_20 fp_20 0.4064345 0.3539163 0.01963762 
 ## anger by_20 fp_8 0.5778579 0.7666435 0.0563979 
-## sad by_24 fp_8 0.06889894 0.1816639 0.1075913 
-## social by_20 fp_20 0.52375 0.4680257 0.01565063 
-## family by_24 fp_16 0.5322721 0.6305864 0.01958677 
-## friend by_20 fp_8 0.2372235 0.4273936 0.1208702 
+## sad by_20 fp_4 0.1158634 0.3861359 0.1121442 
+## social by_24 fp_20 0.200333 0.200333 0.012627 
+## family by_20 fp_20 0.6000416 0.5454975 0.01686534 
+## friend by_20 fp_16 0.3261272 0.3673894 0.1180271 
 ## female by_20 fp_16 0.4109245 0.4556609 0.02205012 
-## male by_12 fp_20 0.8327161 0.6441448 0.02770723 
+## male by_20 fp_24 0.7646045 0.6608907 0.02009567 
 ## cogproc by_24 fp_24 0.7019095 0.638469 0.03837287 
-## insight by_20 fp_20 0.6532041 0.6010902 0.02091716 
-## cause by_24 fp_16 0.4793865 0.5800465 0.05800575 
-## discrep by_24 fp_16 0.4696002 0.570457 0.03827338 
+## insight by_20 fp_24 0.8525951 0.7763074 0.01888291 
+## cause by_20 fp_20 0.684138 0.6340685 0.05834792 
+## discrep by_24 fp_24 0.5008953 0.4294487 0.0393135 
 ## tentat by_24 fp_24 0.3517581 0.2892556 0.04469576 
-## certain by_12 fp_12 0.8914662 0.8566024 0.05033337 
-## differ by_24 fp_24 0.6346494 0.5657503 0.03680398 
-## percept by_12 fp_24 0.9732085 0.9083149 0.1501584 
-## see by_20 fp_16 0.6003536 0.6431954 0.06096207 
-## hear by_20 fp_24 0.8446264 0.7653497 0.112352 
-## feel by_20 fp_4 0.3821068 0.748005 0.1250434 
-## bio by_24 fp_16 0.256478 0.3409889 0.1482167 
-## body by_20 fp_16 0.6768416 0.7153713 0.127259 
-## health by_12 fp_16 0.5538433 0.4037355 0.03653312 
-## sexual by_20 fp_24 0.4116729 0.2956957 0.108525 
-## ingest by_20 fp_4 0.2728889 0.6430442 0.09161994 
+## certain by_12 fp_16 0.9364839 0.8894074 0.04960056 
+## differ by_24 fp_8 0.3111936 0.5754365 0.0420562 
+## percept by_20 fp_8 0.6087225 0.7887512 0.1488818 
+## see by_20 fp_24 0.8343484 0.7513712 0.05674099 
+## hear by_20 fp_12 0.672359 0.7665402 0.1174244 
+## feel by_20 fp_12 0.5892665 0.6965532 0.1192195 
+## bio by_20 fp_12 0.5733416 0.682547 0.1519411 
+## body by_20 fp_12 0.4973265 0.6128504 0.129908 
+## health by_24 fp_16 0.2503989 0.333806 0.02990671 
+## sexual by_16 fp_4 0.1080393 0.266527 0.1193694 
+## ingest by_24 fp_20 0.5516243 0.5516243 0.0864737 
 ## drives by_20 fp_16 0.3874002 0.4314514 0.04170832 
-## affiliation by_20 fp_16 0.5969011 0.639891 0.0382777 
+## affiliation by_20 fp_20 0.6756517 0.6249744 0.0372291 
 ## achieve by_20 fp_4 0.2062604 0.5550262 0.03904032 
-## power by_20 fp_8 0.2539216 0.4495877 0.02031653 
-## reward by_20 fp_8 0.2530927 0.4485042 0.03049276 
-## risk by_20 fp_24 0.6142634 0.4886129 0.04258512 
-## focuspast by_20 fp_24 0.6446023 0.52113 0.07031646 
-## focuspresent by_20 fp_8 0.6680208 0.8284548 0.0403642 
-## focusfuture by_12 fp_24 0.7068189 0.3966845 0.06968307 
-## relativ by_20 fp_12 0.3841063 0.4994621 0.04847586 
-## motion by_20 fp_16 0.5120543 0.5573831 0.04556267 
-## space by_20 fp_16 0.4148838 0.4597149 0.07992106 
-## time by_16 fp_24 0.6660618 0.4279053 0.0175382 
-## work by_20 fp_16 0.6670056 0.706199 0.0259764 
-## leisure by_20 fp_16 0.1533029 0.1784909 0.07973989 
+## power by_20 fp_16 0.3135485 0.3540555 0.01847998 
+## reward by_24 fp_20 0.2895897 0.2895897 0.02494999 
+## risk by_24 fp_20 0.4061171 0.4061171 0.04721931 
+## focuspast by_20 fp_16 0.6394604 0.6803422 0.06976837 
+## focuspresent by_20 fp_20 0.8401065 0.8078154 0.03488815 
+## focusfuture by_12 fp_12 0.6198644 0.5425267 0.07331195 
+## relativ by_20 fp_20 0.4382149 0.3842486 0.04709023 
+## motion by_20 fp_20 0.6135716 0.5595182 0.04424091 
+## space by_20 fp_24 0.54825 0.4213526 0.07654873 
+## time by_16 fp_16 0.6556603 0.5881523 0.01777313 
+## work by_20 fp_8 0.5449647 0.7418899 0.02971034 
+## leisure by_20 fp_8 0.150461 0.2982759 0.07979021 
 ## home by_24 fp_12 0.406328 0.5778566 0.04309691 
-## money by_24 fp_12 0.2402978 0.387484 0.02053417 
-## relig by_24 fp_8 0.2850164 0.544606 0.01920619 
-## death by_24 fp_4 0.04751786 0.230373 0.02636742 
-## informal by_16 fp_8 0.5466771 0.6439887 0.03669946 
-## swear by_24 fp_12 0.1854572 0.3128872 0.2130136 
-## netspeak by_16 fp_24 0.6008382 0.3608053 0.0232177 
-## assent by_16 fp_12 0.7439668 0.7439668 0.02217122 
+## money by_12 fp_20 0.6838588 0.4402769 0.0273939 
+## relig by_24 fp_16 0.3313876 0.4264253 0.01404888 
+## death by_20 fp_20 0.6864327 0.6365336 0.01962599 
+## informal by_20 fp_12 0.4501533 0.5670812 0.02705442 
+## swear by_20 fp_16 0.4782721 0.5238208 0.2145503 
+## netspeak by_8 fp_12 0.7315711 0.5767537 0.02747002 
+## assent by_16 fp_8 0.5847278 0.6786724 0.02618648 
 ## nonflu by_20 fp_24 0.6204515 0.49516 0.02993087 
-## filler by_20 fp_16 0.5290108 0.5740746 0.07960889
+## filler by_20 fp_24 0.5778458 0.4509361 0.07932108
 
-res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col)
+res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col, pmse_oos = pmse_oos.col, cmse_oos = cmse_oos.col, delta_oos = delta_oos.col, r2_oos = r2_oos.col)
 write.csv(res.df, file = 'crossvalidated_delta_knit.tsv', quote = FALSE, row.names = FALSE)
 ```
 
 RESULTS:
 
-    ## Mean delta is  0.52071
-    ## If we adjust for df it is  0.55804
-    ## The average r2 is  0.05338
+    ## Mean delta is  0.53977
+    ## If we adjust for df it is  0.57346
+    ## The average r2 is  0.05315
     ## The weighted average, sum(cmse.col) / (sum(cmse.col) + sum(pmse.col)):
-    ## 0.53617
+    ## 0.53426
+    ## 
+    ## Mean delta measured oos is  0.46374
+    ## but as a weighted average it is: 0.48683
 
-<img src="gridsearch_files/figure-gfm/unnamed-chunk-7-1.svg" width="100%" style="display: block; margin: auto;" />
+<img src="gridsearch_oos_files/figure-gfm/unnamed-chunk-7-1.svg" width="100%" style="display: block; margin: auto;" />
