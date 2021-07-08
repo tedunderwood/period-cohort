@@ -131,39 +131,47 @@ cross_validate <- function(modelstring, data, depvar) {
 partial_r2s_oos <- function(modelstring, data, depvar, cohortvar, periodvar) {
   
   # See how much difference variables make out of sample.
+  # Our strategy is to make predictions out of sample:
+  # 1) using actual predictive variables
+  # 2) with the cohort variable permuted
+  # 3) with the period variable permuted
+  #
+  # The differences between 1 and 2 or 3 reflect lost predictive power.
   
   authors <- unique(d$author)
   authors <- sample(authors)
   tenauthsets <- chunk2(authors, 10)
   
-  periodr2s <- c()
-  cohortr2s <- c()
+  baseprediction <- c()
+  predictionsanscohort <- c()
+  predictionsansperiod <- c()
+  correctyvals <- c()
   
   for (authset in tenauthsets){
     dtest <- d[d$author %in% authset,  ]
     dtrain <- d[!d$author %in% authset,  ]
     model <- lm(as.formula(modelstring), data = dtrain)
     oos_predictions <- predict(model, newdata = dtest)
-    baser2 <- r_squared(dtest[depvar], oos_predictions)
+    baseprediction <- c(baseprediction, oos_predictions)
+    correctyvals <- c(correctyvals, dtest[depvar][[1]])
     
     cohortdata <- data.frame(dtest)
     cohortdata[cohortvar] <- sample(cohortdata[cohortvar][[1]])
     oos_predictions <- predict(model, newdata = cohortdata)
-    losecohortr2 <- baser2 - r_squared(cohortdata[depvar], oos_predictions)
-    # cat(baser2, ' ', r_squared(cohortdata[depvar], oos_predictions), '\n')
+    predictionsanscohort <- c(predictionsanscohort, oos_predictions)
     
     perioddata <- data.frame(dtest)
     perioddata[periodvar] <- sample(perioddata[periodvar][[1]])
     oos_predictions <- predict(model, newdata = perioddata)
-    loseperiodr2 <- baser2 - r_squared(cohortdata[depvar], oos_predictions)
-    
-    periodr2s <- c(periodr2s, loseperiodr2)
-    cohortr2s <- c(cohortr2s, losecohortr2)
-    
-    # oldcor = sum(dtest[cohortvar] == cohortdata[cohortvar])
-    # cat(oldcor, '\n')
+    predictionsansperiod <- c(predictionsansperiod, oos_predictions)
   }
-  returnvalue <- list(periodr2 = mean(periodr2s), cohortr2  = mean(cohortr2s))
+  #cat(correctyvals, '\n')
+  # cat(baseprediction, '\n')
+  baser2 <- r_squared(correctyvals, baseprediction)
+  sanscohortr2 <- r_squared(correctyvals, predictionsanscohort)
+  sansperiodr2 <- r_squared(correctyvals, predictionsansperiod)
+  
+  returnvalue <- list(periodr2 = baser2 - sansperiodr2, cohortr2  = baser2 - sanscohortr2)
   returnvalue
 }
 
