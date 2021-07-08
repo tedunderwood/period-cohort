@@ -59,6 +59,17 @@ discretize <- function(numericvar, width) {
     }
   }
 breaks <- c(neededbreaks, maxval)
+
+# The algorithm above ensures that breaks are less tightly packed in tails of 
+# distributions. But when the list of breaks gets quite short it can be
+# tricky to arrange the breaks to compromise between even chronological
+# spacing and (roughly!) even numbers of volumes in factor levels.
+# The following cases are therefore addressed manually:
+
+if (minval == 1889 & width == 24) breaks = c(1889, 1914, 1938, 1961, 1990)
+if (minval == 1808 & width == 24) breaks = c(1808, 1854, 1878, 1902, 1926, 1990)
+if (minval == 1808 & width == 20) breaks = c(1808, 1850, 1870, 1890, 1910, 1930, 1990)
+
 print(breaks)
 result <- cut(numericvar, breaks = as.integer(breaks), labels = as.character(breaks[1: length(breaks) -1]))
 result
@@ -96,10 +107,15 @@ r_squared <- function(vals, preds) {
 }
 
 cross_validate <- function(modelstring, data, depvar) {
+  
+  # Testing a model specified by modelstring.
+  # We test it on out-of-sample authors.
+  
   authors <- unique(d$author)
   authors <- sample(authors)
   fiveauthsets <- chunk2(authors, 5)
   rsquaredvals <- c()
+  
   for (authset in fiveauthsets){
     dtest <- d[d$author %in% authset,  ]
     dtrain <- d[!d$author %in% authset,  ]
@@ -110,6 +126,9 @@ cross_validate <- function(modelstring, data, depvar) {
   }
   mean(rsquaredvals)
 }
+
+periodnames = c('fp_4', 'fp_8', 'fp_12', 'fp_16', 'fp_20', 'fp_24')
+cohortnames = c('by_4', 'by_8', 'by_12', 'by_16', 'by_20', 'by_24')
 
 varname.col <- c()
 cmse.col <- c()
@@ -122,6 +141,8 @@ fpwidth.col <- c()
 bydf.col <- c()
 fpdf.col <- c()
 
+# Iterate across dependent variables:
+
 for (varnum in seq(10, 89)){
   depvar <- colnames(d)[varnum]
   if (depvar == 'function') next  # that word breaks my as.formula!     
@@ -130,34 +151,62 @@ for (varnum in seq(10, 89)){
   bestbywidth <- 50
   bestfpwidth <- 50
   
+  # For each dependent variables, do a grid search to find the
+  # granularity of factors that produce the highest r2.
+  # This is assessed using the cross_validate function above,
+  # which tests on out-of-sample authors.
+  
   for (bywidth in seq(4, 24, 4)) {
     for (fpwidth in seq(4, 24, 4)) {
+      
       bylabel = paste('by_', as.character(bywidth), sep = '')
       fplabel = paste('fp_', as.character(fpwidth), sep = '')
       modelstring <- paste(depvar, '~', 'authorage + I(authorage^2) + ', bylabel, '+', fplabel)
       thisr2 <- cross_validate(modelstring, d, depvar)
+      
       if (thisr2 > bestr2) {
         bestr2 <- thisr2
         bestmodel <- modelstring
-        bestbywidth <- bywidth
-        bestfpwidth <- fpwidth
+        bestbywidth <- bylabel
+        bestfpwidth <- fplabel
       }
     }
   }
+  
+  # We're done finding the best model specification.
+  # Now we train it on all data and examine sums of squares.
+  
   model <- lm(as.formula(bestmodel), data = d)
-  r2 <- summary(model)$r.squared
+  thisr2 <- summary(model)$r.squared
   at <- anova_test(model, detailed = TRUE)
-  cmse <- at[3,2]
-  cdf <- at[3,4]
-  pmse <- at[4, 2]
-  pdf <- at[4,4]
+  
+  cmse = 0
+  pmse = 0
+  cdf = 0
+  pdf = 0
+  
+  for (rownum in seq(3, dim(at)[1])) {
+    variable_name = at[rownum, 1]
+    if (variable_name %in% cohortnames){
+      cmse = cmse + at[rownum, 2]
+      cdf = cdf + at[rownum, 4]
+    }
+    else if (variable_name %in% periodnames) {
+      pmse = pmse + at[rownum, 2]
+      pdf = pdf + at[rownum, 4]
+    }
+    else {
+      print('Model error.')
+    }
+  }
+
   delta <- cmse / (cmse + pmse)
   adjdelta = (cmse/cdf) / ((cmse/cdf) + (pmse / pdf))
-  cat(depvar, bestbywidth, bestfpwidth, delta, adjdelta, bestr2, '\n')
+  cat(depvar, bestbywidth, bestfpwidth, delta, adjdelta, thisr2, '\n')
   varname.col <- c(varname.col, depvar)
   cmse.col <- c(cmse.col, cmse)
   pmse.col <- c(pmse.col, pmse)
-  r2.col <- c(r2.col, bestr2)
+  r2.col <- c(r2.col, thisr2)
   delta.col <- c(delta.col, delta)
   adjdelta.col <- c(adjdelta.col, adjdelta)
   bywidth.col <- c(bywidth.col, bestbywidth)

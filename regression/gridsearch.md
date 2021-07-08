@@ -51,6 +51,17 @@ discretize <- function(numericvar, width) {
     }
   }
 breaks <- c(neededbreaks, maxval)
+
+# The algorithm above ensures that breaks are less tightly packed in tails of 
+# distributions. But when the list of breaks gets quite short it can be
+# tricky to arrange the breaks to compromise between even chronological
+# spacing and (roughly!) even numbers of volumes in factor levels.
+# The following cases are therefore addressed manually:
+
+if (minval == 1889 & width == 24) breaks = c(1889, 1914, 1938, 1961, 1990)
+if (minval == 1808 & width == 24) breaks = c(1808, 1854, 1878, 1902, 1926, 1990)
+if (minval == 1808 & width == 20) breaks = c(1808, 1850, 1870, 1890, 1910, 1930, 1990)
+
 print(breaks)
 result <- cut(numericvar, breaks = as.integer(breaks), labels = as.character(breaks[1: length(breaks) -1]))
 result
@@ -74,10 +85,10 @@ for (width in seq(4, 24, 4)){
 ##  [1] 1889 1901 1913 1925 1937 1949 1961 1973 1985 1990
 ##  [1] 1808 1840 1856 1872 1888 1904 1920 1936 1952 1963
 ## [1] 1889 1905 1921 1937 1953 1969 1985 1990
-## [1] 1808 1848 1868 1888 1908 1928 1948 1963
+## [1] 1808 1850 1870 1890 1910 1930 1990
 ## [1] 1889 1909 1929 1949 1969 1990
-## [1] 1808 1832 1856 1880 1904 1928 1952 1963
-## [1] 1889 1913 1937 1961 1985 1990
+## [1] 1808 1854 1878 1902 1926 1990
+## [1] 1889 1914 1938 1961 1990
 ```
 
 SCALE LIWC COLUMNS WITH BIZARRELY UNEVEN SCALES
@@ -106,10 +117,15 @@ r_squared <- function(vals, preds) {
 }
 
 cross_validate <- function(modelstring, data, depvar) {
+  
+  # Testing a model specified by modelstring.
+  # We test it on out-of-sample authors.
+  
   authors <- unique(d$author)
   authors <- sample(authors)
   fiveauthsets <- chunk2(authors, 5)
   rsquaredvals <- c()
+  
   for (authset in fiveauthsets){
     dtest <- d[d$author %in% authset,  ]
     dtrain <- d[!d$author %in% authset,  ]
@@ -120,6 +136,9 @@ cross_validate <- function(modelstring, data, depvar) {
   }
   mean(rsquaredvals)
 }
+
+periodnames = c('fp_4', 'fp_8', 'fp_12', 'fp_16', 'fp_20', 'fp_24')
+cohortnames = c('by_4', 'by_8', 'by_12', 'by_16', 'by_20', 'by_24')
 
 varname.col <- c()
 cmse.col <- c()
@@ -132,6 +151,8 @@ fpwidth.col <- c()
 bydf.col <- c()
 fpdf.col <- c()
 
+# Iterate across dependent variables:
+
 for (varnum in seq(10, 89)){
   depvar <- colnames(d)[varnum]
   if (depvar == 'function') next  # that word breaks my as.formula!     
@@ -140,34 +161,62 @@ for (varnum in seq(10, 89)){
   bestbywidth <- 50
   bestfpwidth <- 50
   
+  # For each dependent variables, do a grid search to find the
+  # granularity of factors that produce the highest r2.
+  # This is assessed using the cross_validate function above,
+  # which tests on out-of-sample authors.
+  
   for (bywidth in seq(4, 24, 4)) {
     for (fpwidth in seq(4, 24, 4)) {
+      
       bylabel = paste('by_', as.character(bywidth), sep = '')
       fplabel = paste('fp_', as.character(fpwidth), sep = '')
       modelstring <- paste(depvar, '~', 'authorage + I(authorage^2) + ', bylabel, '+', fplabel)
       thisr2 <- cross_validate(modelstring, d, depvar)
+      
       if (thisr2 > bestr2) {
         bestr2 <- thisr2
         bestmodel <- modelstring
-        bestbywidth <- bywidth
-        bestfpwidth <- fpwidth
+        bestbywidth <- bylabel
+        bestfpwidth <- fplabel
       }
     }
   }
+  
+  # We're done finding the best model specification.
+  # Now we train it on all data and examine sums of squares.
+  
   model <- lm(as.formula(bestmodel), data = d)
-  r2 <- summary(model)$r.squared
+  thisr2 <- summary(model)$r.squared
   at <- anova_test(model, detailed = TRUE)
-  cmse <- at[3,2]
-  cdf <- at[3,4]
-  pmse <- at[4, 2]
-  pdf <- at[4,4]
+  
+  cmse = 0
+  pmse = 0
+  cdf = 0
+  pdf = 0
+  
+  for (rownum in seq(3, dim(at)[1])) {
+    variable_name = at[rownum, 1]
+    if (variable_name %in% cohortnames){
+      cmse = cmse + at[rownum, 2]
+      cdf = cdf + at[rownum, 4]
+    }
+    else if (variable_name %in% periodnames) {
+      pmse = pmse + at[rownum, 2]
+      pdf = pdf + at[rownum, 4]
+    }
+    else {
+      print('Model error.')
+    }
+  }
+
   delta <- cmse / (cmse + pmse)
   adjdelta = (cmse/cdf) / ((cmse/cdf) + (pmse / pdf))
-  cat(depvar, bestbywidth, bestfpwidth, delta, adjdelta, bestr2, '\n')
+  cat(depvar, bestbywidth, bestfpwidth, delta, adjdelta, thisr2, '\n')
   varname.col <- c(varname.col, depvar)
   cmse.col <- c(cmse.col, cmse)
   pmse.col <- c(pmse.col, pmse)
-  r2.col <- c(r2.col, bestr2)
+  r2.col <- c(r2.col, thisr2)
   delta.col <- c(delta.col, delta)
   adjdelta.col <- c(adjdelta.col, adjdelta)
   bywidth.col <- c(bywidth.col, bestbywidth)
@@ -175,86 +224,86 @@ for (varnum in seq(10, 89)){
   bydf.col <- c(bydf.col, cdf)
   fpdf.col <- c(fpdf.col, pdf)
 }
-## Analytic 24 24 0.5464306 0.4454169 0.02215452 
-## Clout 16 20 0.4348583 0.2778396 0.009445159 
-## Authentic 12 12 0.3631732 0.293163 0.01892943 
-## Tone 20 8 0.6338786 0.7759189 0.128963 
-## WPS 24 20 0.5687051 0.4678208 0.002460615 
-## Sixltr 16 4 0.3201651 0.5855499 0.009360323 
-## Dic 24 24 0.3950294 0.3032889 0.02370028 
-## was_function 24 16 0.3458359 0.3458359 0.01078058 
-## pronoun 24 8 0.3804954 0.5512447 -0.0006751276 
-## ppron 24 4 0.3136752 0.6464113 0.001200856 
-## i 20 4 0.4474424 0.7640989 0.03639676 
-## we 24 16 0.405102 0.405102 0.014499 
-## you 8 24 0.9645729 0.8719057 0.0003943422 
-## shehe 24 12 0.1619809 0.2049107 0.01226409 
-## they 16 24 0.7874242 0.6493814 0.01362915 
-## ipron 24 12 0.6875401 0.7457981 0.02052284 
-## article 16 16 0.9375941 0.9184878 0.0178247 
-## prep 16 16 0.5343579 0.4625618 0.05012678 
-## auxverb 20 12 0.4015911 0.4722391 0.05721471 
-## adverb 16 8 0.4130675 0.5135383 0.04087515 
-## conj 20 20 0.7052392 0.6146516 0.02613217 
-## negate 24 20 0.5024294 0.4023345 0.02705763 
-## verb 20 20 0.4019703 0.3094424 0.05653592 
-## adj 16 16 0.7343231 0.6745828 0.01833242 
-## compare 24 24 0.8880029 0.840913 0.00453327 
-## interrog 20 24 0.8288822 0.7635535 0.02642124 
-## number 16 16 0.71632 0.6544365 0.01389588 
-## quant 20 20 0.9002998 0.8575508 0.0351153 
-## affect 12 12 0.869914 0.8294515 0.1086874 
-## posemo 12 20 0.9844041 0.9582506 0.16799 
-## negemo 20 8 0.3127277 0.4764548 0.01702791 
-## anx 16 16 0.6543114 0.5867056 0.009911559 
-## anger 24 8 0.3828063 0.5536658 0.04016583 
-## sad 20 20 0.2956508 0.2186484 0.09651646 
-## social 20 24 0.4128051 0.319114 0.00295496 
-## family 20 20 0.6390025 0.5412987 0.01525128 
-## friend 20 16 0.4020735 0.4020735 0.1123876 
-## female 20 16 0.5490684 0.5490684 0.01148612 
-## male 20 16 0.593143 0.593143 0.01428869 
-## cogproc 24 12 0.6324577 0.6964515 0.03098651 
-## insight 20 16 0.5184984 0.5184984 0.00766363 
-## cause 24 12 0.5532188 0.6227805 0.05082884 
-## discrep 20 16 0.5542664 0.5542664 0.03024496 
-## tentat 16 12 0.5754218 0.5754218 0.03540158 
-## certain 24 24 0.9606721 0.9421457 0.02981652 
-## differ 16 8 0.5068276 0.6065367 0.0285035 
-## percept 12 16 0.8510613 0.7570941 0.131437 
-## see 24 4 0.308131 0.6404742 0.04500059 
-## hear 12 24 0.8353859 0.6485539 0.1020351 
-## feel 20 24 0.6894546 0.5967895 0.1075613 
-## bio 20 12 0.3864943 0.4565126 0.1383789 
-## body 20 16 0.6384735 0.6384735 0.1151494 
-## health 24 16 0.4897252 0.4897252 0.02699592 
-## sexual 20 4 0.1651142 0.4416759 0.1092072 
-## ingest 24 20 0.3570066 0.2701532 0.07758642 
-## drives 20 16 0.4092593 0.4092593 0.02991385 
-## affiliation 20 20 0.658192 0.5621229 0.03113054 
-## achieve 24 16 0.2844084 0.2844084 0.02000353 
-## power 20 8 0.2735187 0.429548 0.005927461 
-## reward 16 20 0.5812881 0.4097295 0.02135736 
-## risk 20 12 0.3956632 0.4660806 0.03417901 
-## focuspast 16 24 0.5312733 0.3617237 0.05597997 
-## focuspresent 20 8 0.4431754 0.6141671 0.01574976 
-## focusfuture 24 16 0.482241 0.482241 0.05207647 
-## relativ 24 20 0.3898584 0.2987259 0.03404041 
-## motion 16 16 0.3467827 0.2847758 0.03224912 
-## space 16 24 0.5800286 0.4084791 0.06552769 
-## time 16 8 0.560232 0.6564624 0.002431366 
-## work 16 4 0.3897664 0.6570822 0.01343776 
-## leisure 24 24 0.8904202 0.8441683 0.07505281 
-## home 20 20 0.1905921 0.1356813 0.02624501 
-## money 16 8 0.4529902 0.5540058 0.01439363 
-## relig 20 8 0.3142078 0.4781707 0.004472276 
-## death 20 24 0.6485882 0.5516586 0.0102238 
-## informal 16 12 0.5964483 0.5964483 0.02158725 
-## swear 12 4 0.3301251 0.5181269 0.2112415 
-## netspeak 16 8 0.5484058 0.6455869 0.01308742 
-## assent 24 16 0.6988555 0.6988555 0.008884729 
-## nonflu 20 4 0.2302735 0.5447615 0.01675205 
-## filler 16 20 0.4680298 0.3055084 0.07205623
+## Analytic by_20 fp_16 0.7577409 0.7896231 0.03289917 
+## Clout by_20 fp_20 0.4587939 0.4041163 0.02147811 
+## Authentic by_24 fp_12 0.05596308 0.1059944 0.02838165 
+## Tone by_12 fp_16 0.9593651 0.9279428 0.14804 
+## WPS by_20 fp_16 0.6008864 0.6437049 0.009899119 
+## Sixltr by_20 fp_8 0.4639579 0.6750356 0.03234831 
+## Dic by_24 fp_20 0.2984343 0.2984343 0.03060867 
+## was_function by_20 fp_20 0.5890841 0.5342057 0.01999042 
+## pronoun by_24 fp_24 0.4844705 0.4134261 0.01643846 
+## ppron by_24 fp_20 0.5212397 0.5212397 0.01412352 
+## i by_20 fp_4 0.4220803 0.7780565 0.05087089 
+## we by_20 fp_16 0.4044321 0.4490005 0.02068344 
+## you by_20 fp_8 0.7688872 0.8886977 0.0230294 
+## shehe by_24 fp_12 0.1237852 0.2203005 0.02330205 
+## they by_20 fp_12 0.2280711 0.3209888 0.02289 
+## ipron by_20 fp_12 0.8068829 0.8698786 0.03601518 
+## article by_24 fp_16 0.6982861 0.7763662 0.02446178 
+## prep by_20 fp_12 0.6528121 0.7505274 0.06660313 
+## auxverb by_12 fp_8 0.5857077 0.606652 0.07657784 
+## adverb by_20 fp_8 0.2662042 0.4654307 0.05704687 
+## conj by_20 fp_20 0.8212386 0.7861072 0.03537081 
+## negate by_20 fp_8 0.3670651 0.5819152 0.04188987 
+## verb by_20 fp_12 0.545111 0.6572222 0.07310222 
+## adj by_24 fp_8 0.6806649 0.8647647 0.03735482 
+## compare by_24 fp_24 0.8535758 0.8138532 0.01447291 
+## interrog by_20 fp_12 0.6893438 0.7802385 0.04851721 
+## number by_16 fp_8 0.669196 0.7521321 0.0318026 
+## quant by_20 fp_12 0.4435272 0.5604884 0.04761438 
+## affect by_20 fp_4 0.2368163 0.5983036 0.1257349 
+## posemo by_12 fp_24 0.9598524 0.8670282 0.1827736 
+## negemo by_20 fp_24 0.5605093 0.4334973 0.02505866 
+## anx by_20 fp_24 0.4126036 0.2964964 0.01785945 
+## anger by_24 fp_4 0.2433963 0.6587235 0.05868036 
+## sad by_16 fp_8 0.1437381 0.2011507 0.1087547 
+## social by_8 fp_20 0.6263081 0.2952785 0.01929796 
+## family by_24 fp_24 0.6553254 0.5877929 0.01765435 
+## friend by_16 fp_24 0.8272043 0.642243 0.1174003 
+## female by_20 fp_4 0.2648671 0.6336234 0.02713703 
+## male by_20 fp_12 0.6398328 0.7397448 0.02117151 
+## cogproc by_24 fp_8 0.4020238 0.6685364 0.04127732 
+## insight by_20 fp_12 0.563976 0.6742164 0.02218919 
+## cause by_24 fp_12 0.4615028 0.6315456 0.05869422 
+## discrep by_24 fp_24 0.5008953 0.4294487 0.0393135 
+## tentat by_24 fp_24 0.3517581 0.2892556 0.04469576 
+## certain by_12 fp_16 0.9409065 0.8967466 0.04953282 
+## differ by_12 fp_8 0.6408843 0.6606552 0.04709173 
+## percept by_12 fp_20 0.8510142 0.6750197 0.1532687 
+## see by_20 fp_8 0.5783697 0.7670188 0.06181422 
+## hear by_20 fp_12 0.672359 0.7665402 0.1174244 
+## feel by_20 fp_24 0.8115054 0.7209132 0.1164225 
+## bio by_16 fp_20 0.8473821 0.7351804 0.1493041 
+## body by_20 fp_24 0.8555278 0.7803669 0.1261985 
+## health by_12 fp_16 0.5505197 0.4005041 0.03668952 
+## sexual by_24 fp_4 0.05476225 0.2579452 0.1179274 
+## ingest by_24 fp_20 0.5516243 0.5516243 0.0864737 
+## drives by_24 fp_4 0.1946263 0.5918297 0.04398648 
+## affiliation by_20 fp_20 0.6756517 0.6249744 0.0372291 
+## achieve by_24 fp_4 0.1444841 0.503306 0.03767525 
+## power by_24 fp_24 0.2420625 0.1932409 0.01424526 
+## reward by_20 fp_20 0.3871636 0.3357271 0.02579302 
+## risk by_12 fp_20 0.6769035 0.4324105 0.05649822 
+## focuspast by_20 fp_24 0.6446023 0.52113 0.07031646 
+## focuspresent by_20 fp_4 0.633962 0.8926277 0.04170528 
+## focusfuture by_12 fp_12 0.6198644 0.5425267 0.07331195 
+## relativ by_24 fp_8 0.08584196 0.2197913 0.04732707 
+## motion by_20 fp_12 0.5188197 0.6330487 0.04530756 
+## space by_20 fp_16 0.4112298 0.4559737 0.07995179 
+## time by_16 fp_12 0.5967797 0.5967797 0.01928622 
+## work by_20 fp_8 0.5449647 0.7418899 0.02971034 
+## leisure by_24 fp_24 0.9296918 0.9084024 0.07873603 
+## home by_24 fp_20 0.3703577 0.3703577 0.04212497 
+## money by_20 fp_12 0.1922471 0.2757841 0.01935557 
+## relig by_20 fp_20 0.2311624 0.1938941 0.01150706 
+## death by_24 fp_20 0.4470037 0.4470037 0.01592768 
+## informal by_16 fp_16 0.7095242 0.6468891 0.03021254 
+## swear by_16 fp_12 0.4096581 0.4096581 0.2170371 
+## netspeak by_24 fp_20 0.5766119 0.5766119 0.01726123 
+## assent by_16 fp_8 0.5847278 0.6786724 0.02618648 
+## nonflu by_20 fp_24 0.6204515 0.49516 0.02993087 
+## filler by_20 fp_12 0.4386118 0.5555709 0.08131035
 
 res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col)
 write.csv(res.df, file = 'crossvalidated_delta_knit.tsv', quote = FALSE, row.names = FALSE)
@@ -262,10 +311,10 @@ write.csv(res.df, file = 'crossvalidated_delta_knit.tsv', quote = FALSE, row.nam
 
 RESULTS:
 
-    ## Mean delta is  0.53166
-    ## If we adjust for df it is  0.54374
-    ## The average r2 is  0.04062
+    ## Mean delta is  0.52887
+    ## If we adjust for df it is  0.57424
+    ## The average r2 is  0.05334
     ## The weighted average, sum(cmse.col) / (sum(cmse.col) + sum(pmse.col)):
-    ## 0.5228
+    ## 0.52252
 
 <img src="gridsearch_files/figure-gfm/unnamed-chunk-7-1.svg" width="100%" style="display: block; margin: auto;" />
