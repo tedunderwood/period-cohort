@@ -1,0 +1,153 @@
+---
+title: "autocorrelation model"
+author: "Kevin Kiley"
+date: "6/2/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Autocorrelation Models
+
+Loop that runs the lme model for all variables in the liwc data set. Takes quite a while to run. 
+
+```{r}
+nodupes <- liwc %>%
+  group_by(hathi_author) %>% #10,417 cases
+  filter(n() > 1) %>% #9,923 cases
+  group_by(hathi_author, firstpub) %>% #some duplicates on first pub date
+  filter(n() == 1) %>%
+  arrange(hathi_author, firstpub) %>% #8,562 cases 
+  group_by(hathi_author) %>%
+  mutate(across(WC:filler, ~ .x - mean(.x)))
+```
+
+Models with year effects:
+
+```{r}
+m1 <- lme(affect ~ 1 + as.factor(firstpub), ~1 | hathi_author,
+          data = nodupes)
+BIC(m1) # 16991.19
+
+
+m2 <- lme(affect ~ 1 + as.factor(firstpub), ~1 | hathi_author,
+          correlation = corCAR1(form = ~ firstpub | hathi_author),
+          data = nodupes)
+BIC(m2) #17000.05
+
+```
+
+The model above includes year fixed-effects. In other words, it asks whether, above and beyond changes in the "mood" of authors that year, an author's work is more similar. Dropping the year effects but keeping the autocorrelation allows authors to follow trends and counts that as meaningful change. 
+
+Models without year effects:
+
+```{r}
+m1.n <- lme(affect ~ 1, ~1 | hathi_author,
+          data = nodupes)
+BIC(m1.n) # 15614.86
+
+
+m2.n <- lme(affect ~ 1, ~1 | hathi_author,
+          correlation = corCAR1(form = ~ firstpub | hathi_author),
+          data = nodupes)
+BIC(m2.n) #15623.66
+
+```
+
+
+```{r}
+d <- nodupes %>% select(hathi_author, firstpub, WC:filler) %>%
+  pivot_longer(WC:filler, names_to = "variable", values_to = "y") %>% 
+  arrange(variable) %>%
+  drop_na() %>% 
+  group_by(variable) %>% 
+  nest()
+
+```
+
+```{r, message = FALSE, warning = FALSE}
+#No autocorrelation, time effects
+lme1_fit <- function (x) {
+  lme(y ~ 1 + factor(firstpub), 
+      random = ~1 | hathi_author,
+      control = lmeControl(opt = "optim"),
+      data = x)
+}
+
+#Autocorrelation, time effects
+lme2_fit <- function(x) {
+  lme(y ~ 1 + factor(firstpub), 
+      random = ~1 | hathi_author,
+      correlation = corCAR1(form = ~ firstpub | hathi_author),
+      #control = lmeControl(opt = "optim"),
+      data = x)
+}
+
+#No autocorrelation, no time effects
+lme1_fit.n <- function (x) {
+  lme(y ~ 1, 
+      random = ~1 | hathi_author,
+      control = lmeControl(opt = "optim"),
+      data = x)
+}
+
+#Autocorrelation, no time effects
+lme2_fit.n <- function(x) {
+  lme(y ~ 1, 
+      random = ~1 | hathi_author,
+      correlation = corCAR1(form = ~ firstpub | hathi_author),
+      #control = lmeControl(opt = "optim"),
+      data = x)
+}
+
+
+lme_models <- d %>%
+  mutate(lme1 = map(data, lme1_fit),
+         lme2 = map(data, lme2_fit),
+         lme1.n = map(data, lme1_fit.n),
+         lme2.n = map(data, lme2_fit.n))
+
+#save(lme_results, file = "~/Dropbox/data/lme_results.Rdata")
+
+```
+
+
+
+```{r}
+results <- lme_models %>%
+  pivot_longer(lme1:lme2.n, names_to = "mod_spec", values_to = "mod_object") %>% 
+  mutate(glanced = map(mod_object, broom::glance)) %>% 
+  unnest(glanced) %>% 
+  select(variable, mod_spec, AIC, BIC, logLik) %>% 
+  ungroup() %>%
+  mutate(model = ifelse(mod_spec %in% c("lme1.n", "lme2.n"), "no year effect", "year effects"))
+
+
+winners <- results %>%
+  group_by(variable, model) %>% 
+  mutate(BIC_diff = BIC - max(BIC)) %>% 
+  filter(BIC == min(BIC)) %>% 
+  mutate(type = mod_spec) %>%
+  mutate(verdict = if_else(BIC_diff >= -2, "Inconclusive", type)) %>% 
+  ungroup()
+
+winners %>% left_join(liwc_categories, by = c("variable" = "liwc_var")) %>%
+  filter(model == "year effects") %>%
+   group_by(category, verdict) %>%
+   summarise(n = n()) %>%
+   group_by(category) %>%
+   mutate(pct = n/sum(n)) %>%
+  mutate(verdict = ifelse(verdict == "Inconclusive", "Inconclusive",
+                          ifelse(verdict == "lme2", "AUM (RE + AR1)", "SDM (RE)"))) %>%
+   ggplot(aes(x = category, y = pct, fill = verdict)) + 
+   geom_bar(stat = "identity", color = "black") + 
+   coord_flip() + 
+   scale_fill_brewer(palette = "Set2") + 
+   theme_minimal()
+
+
+```
+
+
