@@ -28,7 +28,6 @@ pdf("./regression/liwcresplot.pdf")
 # 2. Create a plot
 
 res.df %>%
-  mutate(xmin = adjdelta - .1, xmax = adjdelta + .1) %>%
   left_join(liwc_categories, by = c("depvar"="liwc_var")) %>%
   ggplot(aes(x = reorder(category, adjdelta), y = adjdelta, fill = category,
              label = depvar)) + 
