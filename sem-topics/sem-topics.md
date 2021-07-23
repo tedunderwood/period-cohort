@@ -1,27 +1,11 @@
----
-title: "sem-analysis"
-author: "Kevin Kiley"
-date: "7/22/2021"
-output: github_document
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, 
-                      message = FALSE,
-                      warning = FALSE,
-                      collapse = TRUE,
-                      fig.retina = 2, # Control using dpi
-                      fig.width = 6,  # generated images
-                      fig.pos = "t",  # pdf mode
-                      fig.align = "center", 
-                      out.width = "100%",
-                      dev = "svg")
-```
-
+sem-analysis
+================
+Kevin Kiley
+7/22/2021
 
 Load in required packages:
 
-```{r}
+``` r
 library(lavaan)
 library(broom)
 ```
@@ -30,7 +14,7 @@ library(broom)
 
 Load in data and scale all topic proportions.
 
-```{r}
+``` r
 book <- read.csv('../topicdata/bookleveltopicdata.tsv', sep = '\t')
 
 for (varnum in seq(1, 200)){
@@ -38,21 +22,27 @@ for (varnum in seq(1, 200)){
 }
 ```
 
-Filtering to just authors between 1889 and 1990 with at least 3 books and U.S. nationals. 784 unique authors with 5,060 works (1.45 books per author). I wish there were more.
+Filtering to just authors between 1889 and 1990 with at least 3 books
+and U.S. nationals. 784 unique authors with 5,060 works (1.45 books per
+author). I wish there were more.
 
-```{r}
+``` r
 multi.book <- book %>%
   filter(firstpub < 1990 & firstpub > 1889) %>%
   group_by(hathi_author) %>% 
   filter(n() >= 3) %>%
   arrange(hathi_author, firstpub) %>%
   filter(us_national == "True")
-
 ```
 
-Arrange data into "triples," sets of three books by the same author in chronological order. If an author wrote four books, they will have two triples (books 1, 2, and 3; books 2, 3, and 4). I don't know if this is the best approach, but it's what I have at the moment. We might want to think about weighting by the number of triples an author has in the data set.
+Arrange data into “triples,” sets of three books by the same author in
+chronological order. If an author wrote four books, they will have two
+triples (books 1, 2, and 3; books 2, 3, and 4). I don’t know if this is
+the best approach, but it’s what I have at the moment. We might want to
+think about weighting by the number of triples an author has in the data
+set.
 
-```{r}
+``` r
 multi.book.long <- multi.book %>% 
   select(hathi_author, firstpub, birthyear, t0:t199) %>%
   pivot_longer(t0:t199, names_to = "topic", values_to = "y") %>% 
@@ -74,13 +64,17 @@ multi.book.long <- multi.book %>%
   mutate(w = 1/triples)
 ```
 
-I've added a weighting term (`w`) that's simply one divided by the number of triples for that author. This really affects results later.
+I’ve added a weighting term (`w`) that’s simply one divided by the
+number of triples for that author. This really affects results later.
 
 ## SEM Functions
 
-Below I express the syntax for four active updating models and two settled dispositions model (and one confirmatory factor analysis), as outlined in Vaisey and Kiley (2021). I'm going to compare which of these models best fits the data using BIC. 
+Below I express the syntax for four active updating models and two
+settled dispositions model (and one confirmatory factor analysis), as
+outlined in Vaisey and Kiley (2021). I’m going to compare which of these
+models best fits the data using BIC.
 
-```{r}
+``` r
 #SEM syntax
 aum1_mod <- "
 
@@ -304,15 +298,17 @@ p_aum4_fit <- possibly(aum4_fit, otherwise = "NOPE")
 p_sdm1_fit <- possibly(sdm1_fit, otherwise = "NOPE")
 p_sdm2_fit <- possibly(sdm2_fit, otherwise = "NOPE")
 p_cfa_fit <- possibly(cfa_fit, otherwise = "NOPE")
-
 ```
-
 
 ## Running the Models
 
-I fit all six models to the data and calculate the BIC. I then pick the best-fitting active updating model and the best fitting settled disposition model and compare them. I pick the best fitting model based on lowest BIC. If the BIC difference is less than 2, the result is deemed "inconclusive."
+I fit all six models to the data and calculate the BIC. I then pick the
+best-fitting active updating model and the best fitting settled
+disposition model and compare them. I pick the best fitting model based
+on lowest BIC. If the BIC difference is less than 2, the result is
+deemed “inconclusive.”
 
-```{r}
+``` r
 #Running the models
 multi.book.long.sem <- multi.book.long %>% 
   group_by(topic) %>% nest() %>%
@@ -349,18 +345,22 @@ winners <- results %>%
   ungroup()
 ```
 
-
 ## Results
 
 Count of number of topics in each class.
 
-```{r}
+``` r
 table(winners$verdict)
+## 
+##          AUM Inconclusive          SDM 
+##          112           19           69
 ```
 
-Graph proportion of AUM, SDM, and Inconclusive in each topic category. Really different. Much more AUM.
+Graph proportion of AUM, SDM, and Inconclusive in each topic category.
+Really different. Much more
+AUM.
 
-```{r, message = FALSE, warning = FALSE}
+``` r
 topic.cats <- read.csv('../topicdata/k200standardcoding.tsv', sep = '\t')
 
 winners %>%
@@ -375,9 +375,13 @@ winners %>%
   theme(legend.position = "top") + 
   labs(x = "", y = "Count", fill = "Models:") + 
   scale_fill_brewer(type = "qual", palette = "Set2")
+```
+
+<img src="sem-topics_files/figure-gfm/unnamed-chunk-8-1.svg" width="100%" style="display: block; margin: auto;" />
+
+``` r
 
 library(haven)
 write_csv(results, path = "sem_topic_results.csv") #results for all models for all topics
 write_csv(winners, path = "sem_topic_preferred.csv") #verdict (pref. model) for all topics
 ```
-
