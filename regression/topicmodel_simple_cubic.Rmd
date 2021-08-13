@@ -1,0 +1,98 @@
+---
+title: "Estimating delta through a grid search on the topic model"
+output: github_document
+---
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning = FALSE,
+                      collapse = TRUE,
+                      fig.retina = 2, # Control using dpi
+                      fig.width = 6,  # generated images
+                      fig.pos = "t",  # pdf mode
+                      fig.align = "center", 
+                      out.width = "100%",
+                      dev = "svg")
+```
+Needed packages.
+
+```{r}
+library(tidyverse)
+library(rstatix)
+
+```
+
+Bring in the data. Limiting to 1890-1989. Not requiring multiple works, but requiring us_national. Once this chunk is done executing, there should be 5,572 books in d.
+
+```{r}
+book <- read.csv('/Users/tunder/Dropbox/python/cohort/regression/bookleveltopicdata.tsv', sep = '\t')
+book[['us_national']] <- as.logical(book$us_national)
+d <- book %>%
+  filter(firstpub < 1990 & firstpub > 1889) %>% 
+  filter(us_national == TRUE) %>%
+  rename(author = hathi_author, authorage = age)
+```
+
+All the dependent variables are converted to zscores, so they will have comparable scales.
+
+```{r}
+for (varnum in seq(1, 200)){
+  d[ , varnum] <- scale(d[ , varnum])[, 1]
+}
+```
+
+
+Fit the model.
+
+```{r, warning = FALSE, message = FALSE}
+
+varname.col <- c()
+cmse.col <- c()
+pmse.col <- c()
+r2.col <- c()
+delta.col <- c()
+
+# Iterate across dependent variables:
+
+for (varnum in seq(1, 200)){
+  depvar <- colnames(d)[varnum]
+  if (depvar == 'function') next  # that word breaks my as.formula!     
+  modelstring <- paste(depvar, '~ firstpub + I(firstpub^2) + I(firstpub^3) + birthyear + I(birthyear^2) + I(birthyear^3)')
+  model <- lm(as.formula(modelstring), data = d)
+  thisr2 <- summary(model)$r.squared
+  at <- anova_test(model, detailed = TRUE)
+  
+  cmse = 0
+  pmse = 0
+  cdf = 0
+  pdf = 0
+  
+  pmse = at[1, 2] + at[2, 2] + at[3, 2]
+  cmse = at[4, 2] + at [5, 2] + at[6, 2]
+  
+  delta <- cmse / (cmse + pmse)
+  cat(depvar, delta, thisr2, '\n')
+  delta.col <- c(delta.col, delta)
+  varname.col <- c(varname.col, depvar)
+  cmse.col <- c(cmse.col, cmse)
+  pmse.col <- c(pmse.col, pmse)
+  r2.col <- c(r2.col, thisr2)
+}
+
+res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col)
+write.csv(res.df, file = 'topicmodel_cubic.csv', quote = FALSE, row.names = FALSE)
+```
+RESULTS:
+
+```{r, echo = FALSE}
+cat("Mean delta is ", round(mean(delta.col), digits = 5), '\n')
+cat("If we adjust for df it is ", round(mean(adjdelta.col), digits = 5), '\n')
+cat("The average r2 is ", round(mean(r2.col), digits = 5), '\n')
+cat("The weighted average, sum(cmse.col) / (sum(cmse.col) + sum(pmse.col)):\n")
+weighted <- sum(cmse.col) / (sum(cmse.col) + sum(pmse.col))
+cat(round(weighted, digits = 5), '\n')
+cat('\nMean delta measured oos is ', round(mean(delta_oos.col), digits = 5), '\n')
+cat('but as a weighted average it is:', round(sum(cmse_oos.col) / (sum(cmse_oos.col) + sum(pmse_oos.col)), 5))
+hist(delta.col, breaks = 20, col = 'skyblue1')
+```
