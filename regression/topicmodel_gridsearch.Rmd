@@ -292,7 +292,7 @@ for (varnum in seq(1, 200)){
 }
 
 res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col, pmse_oos = pmse_oos.col, cmse_oos = cmse_oos.col, delta_oos = delta_oos.col, r2_oos = r2_oos.col, agemse = age.col)
-write.csv(res.df, file = 'topicmodel_deltas6.csv', quote = FALSE, row.names = FALSE)
+write.csv(res.df, file = 'topicmodel_deltas7.csv', quote = FALSE, row.names = FALSE)
 ```
 RESULTS:
 
