@@ -2,6 +2,7 @@ Cohort effects and individual change in the history of fiction 1880-1999
 ========================================================================
 
 Two interlocking experiments on literary change, which set out to illuminate the relative importance of cohort effects, event-driven period effects, and longitudinal change across an individual writer's career. 
+
 Ted Underwood, Kevin Kiley, Wenyi Shang, Stephen Vaisey.
 
 The two experiments are:
