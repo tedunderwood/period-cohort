@@ -17,9 +17,9 @@ The project has a preregistration on the Open Science Framework at
 
 Broadly speaking, metadata construction is documented in ```/dataconstruction```, and data construction in ```/get_texts```. The final state of the metadata is in ```/metadata/finalcorpus.tsv```.
 
-The development of a topic model is documented in ```/modelselection,``` and the process of coding topics in ```/interrater.```
+The development of a topic model is documented in ```/modelselection,``` and the process of coding topics in ```/interrater.``` The topics are most fully documented in ```topic_summary.tsv``` (which contains both coding performed before the experiment, and the results of experiments 1 and 2 above).
 
-For full texts of the documents modeled, and a full doc-topics file covering all the texts at "chunk level," see the Zenodo dataset "Topic model of English-language fiction, 1880-1999, with 200 topics." Those files are much too large for a git repository.
+For (scrambled) texts of the documents modeled, and a full doc-topics file covering all the texts at "chunk level," see the Zenodo dataset "Topic model of English-language fiction, 1880-1999, with 200 topics." Those files are much too large for a git repository.
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5515507.svg)](https://doi.org/10.5281/zenodo.5515507)
 
