@@ -1,0 +1,308 @@
+---
+title: "Estimating delta through a grid search on the topic model"
+output: github_document
+---
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning = FALSE,
+                      collapse = TRUE,
+                      fig.retina = 2, # Control using dpi
+                      fig.width = 6,  # generated images
+                      fig.pos = "t",  # pdf mode
+                      fig.align = "center", 
+                      out.width = "100%",
+                      dev = "svg")
+```
+Needed packages.
+
+```{r}
+library(tidyverse)
+library(rstatix)
+
+```
+
+Bring in the data. Limiting to 1890-1989. Not requiring multiple works, but requiring us_national. Once this chunk is done executing, there should be 5,572 books in d.
+
+```{r}
+book <- read.csv('/Users/tunder/Dropbox/python/cohort/regression/bookleveltopicdata.tsv', sep = '\t')
+book[['us_national']] <- as.logical(book$us_national)
+d <- book %>%
+  filter(firstpub < 1990 & firstpub > 1889) %>% 
+  filter(us_national == TRUE) %>%
+  rename(author = hathi_author)
+```
+
+All the dependent variables are converted to zscores, so they will have comparable scales.
+
+```{r}
+for (varnum in seq(1, 200)){
+  d[ , varnum] <- scale(d[ , varnum])[, 1]
+}
+```
+
+Now we convert the numeric columns for birthyear and firstpub into factors. Six different factors are created for each numeric variable, using different binwidths.
+
+To avoid discarding data from the tails, we use a function that creates ad-hoc breaks and requires each new factor level to have at least 20 books. So the breaks toward the end, and especially at the beginning of birthyear, may be more widely spaced than in the middle of the timeline.
+
+```{r}
+discretize <- function(numericvar, width) {
+  minval = min(numericvar) - 1
+  maxval = max(numericvar) + 1
+  breaks = c()
+  for (i in seq(minval, maxval, width)) {
+    breaks <- c(breaks, i)
+  }
+  breaks <- c(breaks, maxval)
+  
+  neededbreaks = c(breaks[1])
+  previous = breaks[1]
+  for (idx in seq(2, length(breaks) - 1)) {
+    prevct = sum(numericvar >= previous & numericvar < breaks[idx])
+    nextct = sum(numericvar >= breaks[idx] & numericvar < breaks[idx + 1])
+    if (prevct > 20 & nextct > 20 & breaks[idx] != 1989 ){
+      previous = breaks[idx]
+      neededbreaks <- c(neededbreaks, breaks[idx])
+    }
+  }
+breaks <- c(neededbreaks, maxval)
+
+# The algorithm above ensures that breaks are less tightly packed in tails of 
+# distributions. But when the list of breaks gets quite short it can be
+# tricky to arrange the breaks to compromise between even chronological
+# spacing and (roughly!) even numbers of volumes in factor levels.
+# The following cases are therefore addressed manually:
+
+if (minval == 1889 & width == 24) breaks = c(1889, 1914, 1938, 1961, 1990)
+if (minval == 1808 & width == 24) breaks = c(1808, 1854, 1878, 1902, 1926, 1990)
+if (minval == 1808 & width == 20) breaks = c(1808, 1850, 1870, 1890, 1910, 1930, 1990)
+if (minval == 1889 & width == 16) breaks = c(1889, 1905, 1921, 1937, 1953, 1968, 1982, 1990)
+
+print(breaks)
+result <- cut(numericvar, breaks = as.integer(breaks), labels = as.character(breaks[1: length(breaks) -1]))
+result
+}
+
+for (width in seq(4, 24, 4)){
+  bylabel = paste('by_', as.character(width), sep = '')
+  fplabel = paste('fp_', as.character(width), sep = '')
+  d[bylabel] <- discretize(as.integer(d$birthyear), width)
+  d[fplabel] <- discretize(as.integer(d$firstpub), width)
+}
+
+```
+
+Now we actually do a grid search to find the best binwdiths for firstpub and birthyear. We select the model with highest overall r2, and in doing that use tenfold cross-validation *on unseen authors*.
+
+After selecting the best model we find out how variance is apportioned across variables.
+
+```{r, warning = FALSE, message = FALSE}
+chunk2 <- function(x,n) split(x, cut(seq_along(x), n, labels = FALSE)) 
+
+r_squared <- function(vals, preds) {
+  1 - (sum((vals - preds)^2) / sum((vals - mean(preds))^2))
+}
+
+cross_validate <- function(modelstring, data, depvar) {
+  
+  # Testing a model specified by modelstring.
+  # We test it on out-of-sample authors.
+  
+  authors <- unique(d$author)
+  authors <- sample(authors)
+  tenauthsets <- chunk2(authors, 10)
+  rsquaredvals <- c()
+  correcty <- c()
+  ypredictions <- c()
+  
+  for (authset in tenauthsets){
+    dtest <- d[d$author %in% authset,  ]
+    dtrain <- d[!d$author %in% authset,  ]
+    model <- lm(as.formula(modelstring), data = dtrain)
+    oos_predictions <- predict(model, newdata = dtest)
+    ypredictions <- c(ypredictions, oos_predictions)
+    correcty <- c(correcty, dtest[[depvar]])
+    # r2 <- r_squared(dtest[depvar], oos_predictions)
+    # rsquaredvals <- c(rsquaredvals, r2)
+  }
+  accurater2 <- r_squared(correcty, ypredictions)
+  # badr2 <-mean(rsquaredvals)
+  # print(abs(badr2-accurater2) / accurater2)
+  accurater2
+}
+
+partial_r2s_oos <- function(modelstring, data, depvar, cohortvar, periodvar) {
+  
+  # See how much difference variables make out of sample.
+  # Our strategy is to make predictions out of sample:
+  # 1) using actual predictive variables
+  # 2) with the cohort variable permuted
+  # 3) with the period variable permuted
+  #
+  # The differences between 1 and 2 or 3 reflect lost predictive power.
+  
+  authors <- unique(d$author)
+  authors <- sample(authors)
+  tenauthsets <- chunk2(authors, 10)
+  
+  baseprediction <- c()
+  predictionsanscohort <- c()
+  predictionsansperiod <- c()
+  correctyvals <- c()
+  
+  for (authset in tenauthsets){
+    dtest <- d[d$author %in% authset,  ]
+    dtrain <- d[!d$author %in% authset,  ]
+    model <- lm(as.formula(modelstring), data = dtrain)
+    oos_predictions <- predict(model, newdata = dtest)
+    baseprediction <- c(baseprediction, oos_predictions)
+    correctyvals <- c(correctyvals, dtest[depvar][[1]])
+    
+    cohortdata <- data.frame(dtest)
+    cohortdata[cohortvar] <- sample(cohortdata[cohortvar][[1]])
+    oos_predictions <- predict(model, newdata = cohortdata)
+    predictionsanscohort <- c(predictionsanscohort, oos_predictions)
+    
+    perioddata <- data.frame(dtest)
+    perioddata[periodvar] <- sample(perioddata[periodvar][[1]])
+    oos_predictions <- predict(model, newdata = perioddata)
+    predictionsansperiod <- c(predictionsansperiod, oos_predictions)
+  }
+  #cat(correctyvals, '\n')
+  # cat(baseprediction, '\n')
+  baser2 <- r_squared(correctyvals, baseprediction)
+  sanscohortr2 <- r_squared(correctyvals, predictionsanscohort)
+  sansperiodr2 <- r_squared(correctyvals, predictionsansperiod)
+  
+  returnvalue <- list(periodr2 = baser2 - sansperiodr2, 
+                      cohortr2  = baser2 - sanscohortr2,
+                      baser2 = baser2)
+  returnvalue
+}
+
+periodnames = c('fp_4', 'fp_8', 'fp_12', 'fp_16', 'fp_20', 'fp_24')
+cohortnames = c('by_4', 'by_8', 'by_12', 'by_16', 'by_20', 'by_24')
+
+varname.col <- c()
+cmse.col <- c()
+pmse.col <- c()
+r2.col <- c()
+delta.col <- c()
+adjdelta.col <- c()
+bywidth.col <- c()
+fpwidth.col <- c()
+bydf.col <- c()
+fpdf.col <- c()
+pmse_oos.col <- c()
+cmse_oos.col <- c()
+delta_oos.col <- c()
+r2_oos.col <- c()
+age.col <- c()
+
+# Iterate across dependent variables:
+
+for (varnum in seq(1, 200)){
+  depvar <- colnames(d)[varnum]
+  if (depvar == 'function') next  # that word breaks my as.formula!     
+  bestr2 <- -0.5
+  bestmodel <- 'the unknown ideal'
+  bestbywidth <- 50
+  bestfpwidth <- 50
+  
+  # For each dependent variables, do a grid search to find the
+  # granularity of factors that produce the highest r2.
+  # This is assessed using the cross_validate function above,
+  # which tests on out-of-sample authors.
+  
+  for (bywidth in seq(4, 24, 4)) {
+    for (fpwidth in seq(4, 24, 4)) {
+      
+      bylabel = paste('by_', as.character(bywidth), sep = '')
+      fplabel = paste('fp_', as.character(fpwidth), sep = '')
+      modelstring <- paste(depvar, '~', bylabel, '+', fplabel)
+      thisr2 <- cross_validate(modelstring, d, depvar)
+      
+      if (thisr2 > bestr2) {
+        bestr2 <- thisr2
+        bestmodel <- modelstring
+        bestbywidth <- bylabel
+        bestfpwidth <- fplabel
+      }
+    }
+  }
+  
+  # We're done finding the best model specification.
+  # Now we train it on all data and examine sums of squares.
+  
+  variances_oos <- partial_r2s_oos(bestmodel, d, depvar, bestbywidth, bestfpwidth)
+  
+  cmse_oos = variances_oos$cohortr2
+  pmse_oos = variances_oos$periodr2
+  r2_oos = variances_oos$baser2
+  
+  if (cmse_oos < 0) cmse_oos = .00000001    # debatable choice here
+  if (pmse_oos < 0) pmse_oos = .00000001
+  
+  model <- lm(as.formula(bestmodel), data = d)
+  thisr2 <- summary(model)$r.squared
+  at <- anova_test(model, detailed = TRUE)
+  
+  cmse = 0
+  pmse = 0
+  cdf = 0
+  pdf = 0
+  
+  # agemse = at[1, 2] + at[2, 2] -- no, it's ageless
+  
+  for (rownum in seq(1, dim(at)[1])) {
+    variable_name = at[rownum, 1]
+    if (variable_name %in% cohortnames){
+      cmse = cmse + at[rownum, 2]
+      cdf = cdf + at[rownum, 4]
+    }
+    else if (variable_name %in% periodnames) {
+      pmse = pmse + at[rownum, 2]
+      pdf = pdf + at[rownum, 4]
+    }
+    else {
+      print('Model error.')
+    }
+  }
+  
+  delta <- cmse / (cmse + pmse)
+  delta_oos <- cmse_oos / (cmse_oos + pmse_oos)
+  adjdelta = (cmse/cdf) / ((cmse/cdf) + (pmse / pdf))
+  cat(depvar, bestbywidth, bestfpwidth, delta, adjdelta, thisr2, '\n')
+  varname.col <- c(varname.col, depvar)
+  cmse.col <- c(cmse.col, cmse)
+  pmse.col <- c(pmse.col, pmse)
+  pmse_oos.col <- c(pmse_oos.col, pmse_oos)
+  cmse_oos.col <- c(cmse_oos.col, cmse_oos)
+  delta_oos.col <- c(delta_oos.col, delta_oos)
+  r2.col <- c(r2.col, thisr2)
+  r2_oos.col <- c(r2_oos.col, r2_oos)
+  delta.col <- c(delta.col, delta)
+  adjdelta.col <- c(adjdelta.col, adjdelta)
+  bywidth.col <- c(bywidth.col, bestbywidth)
+  fpwidth.col <- c(fpwidth.col, bestfpwidth)
+  bydf.col <- c(bydf.col, cdf)
+  fpdf.col <- c(fpdf.col, pdf)
+}
+
+res.df <- data.frame(depvar = varname.col, cmse = cmse.col, pmse = pmse.col, totalr2 = r2.col, delta = delta.col, adjdelta = adjdelta.col, bywidth = bywidth.col, fpwidth = fpwidth.col, bydf = bydf.col, fpdf = fpdf.col, pmse_oos = pmse_oos.col, cmse_oos = cmse_oos.col, delta_oos = delta_oos.col, r2_oos = r2_oos.col)
+write.csv(res.df, file = 'ageless_deltas3.csv', quote = FALSE, row.names = FALSE)
+```
+RESULTS:
+
+```{r, echo = FALSE}
+cat("Mean delta is ", round(mean(delta.col), digits = 5), '\n')
+cat("If we adjust for df it is ", round(mean(adjdelta.col), digits = 5), '\n')
+cat("The average r2 is ", round(mean(r2.col), digits = 5), '\n')
+cat("The weighted average, sum(cmse.col) / (sum(cmse.col) + sum(pmse.col)):\n")
+weighted <- sum(cmse.col) / (sum(cmse.col) + sum(pmse.col))
+cat(round(weighted, digits = 5), '\n')
+cat('\nMean delta measured oos is ', round(mean(delta_oos.col), digits = 5), '\n')
+cat('but as a weighted average it is:', round(sum(cmse_oos.col) / (sum(cmse_oos.col) + sum(pmse_oos.col)), 5))
+hist(delta.col, breaks = 20, col = 'skyblue1')
+```
